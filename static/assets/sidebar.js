@@ -28,24 +28,31 @@ function initials(email) {
 }
 
 function renderShell(activePath) {
+  const agentExpanded = localStorage.getItem('aiwebmaster_agent_menu_expanded') !== '0';
   const navHtml = NAV_ITEMS.map((item, i) => {
     const active = item.path === activePath;
-    return `<a href="${item.path}" data-nav-item="${item.path}"
-      class="group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 animate-fade-in-left
+    const isAgent = item.path === '/agent';
+    const link = `<a href="${item.path}" data-nav-item="${item.path}"
+      class="group relative flex-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150
              ${active
                ? 'bg-brand-panel2 text-brand-ink border border-brand-border shadow-panel'
-               : 'text-brand-muted hover:text-brand-ink hover:bg-brand-panel/70 border border-transparent'}"
-      style="animation-delay:${i * 40}ms">
+               : 'text-brand-muted hover:text-brand-ink hover:bg-brand-panel/70 border border-transparent'}">
       ${active ? '<span class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-brand-gold"></span>' : ''}
       <span class="${active ? 'text-brand-gold' : 'text-brand-muted group-hover:text-brand-gold'} transition-colors">${svgIcon(item.icon)}</span>
       <span class="flex-1">${item.label}</span>
       ${item.path === '/git' ? '<span id="nav-git-badge" class="hidden text-[10px] font-bold bg-brand-terracotta text-white rounded-full w-4 h-4 items-center justify-center"></span>' : ''}
-    </a>
-    ${item.path === '/agent' ? '<div id="agent-menu"></div>' : ''}`;
+    </a>`;
+    const toggle = isAgent
+      ? `<button id="agent-menu-toggle" title="Expand Agent Terminal sessions" class="p-1.5 text-brand-muted hover:text-brand-ink transition-transform shrink-0" style="transform: rotate(${agentExpanded ? '90' : '0'}deg)">
+          ${svgIcon('M9 5l7 7-7 7').replace('w-[18px] h-[18px]', 'w-3.5 h-3.5')}
+        </button>`
+      : '';
+    return `<div class="flex items-center gap-1 animate-fade-in-left" style="animation-delay:${i * 40}ms">${link}${toggle}</div>
+    ${isAgent ? '<div id="agent-menu"></div>' : ''}`;
   }).join('');
 
   return `
-  <aside class="relative z-10 w-64 shrink-0 bg-brand-navy2/80 backdrop-blur border-r border-brand-border shadow-lift flex flex-col p-4 animate-fade-in-left">
+  <aside class="relative z-10 w-64 shrink-0 bg-black/95 backdrop-blur border-r border-white/10 shadow-lift flex flex-col p-4 animate-fade-in-left">
     <div class="flex items-center gap-2.5 px-2 mb-1">
       <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-gold to-amber-600 flex items-center justify-center text-brand-navy font-black text-sm shadow-glow">A</div>
       <div>
@@ -60,7 +67,7 @@ function renderShell(activePath) {
 
     <div class="flex-1"></div>
 
-    <div id="sidebar-who" class="border-t border-brand-border pt-4 px-1">
+    <div id="sidebar-who" class="border-t border-white/10 pt-4 px-1">
       <div class="flex items-center gap-2 animate-pulse">
         <div class="w-8 h-8 rounded-full bg-brand-panel"></div>
         <div class="h-3 w-24 bg-brand-panel rounded"></div>
@@ -318,15 +325,10 @@ async function mountAgentMenu(activePath) {
       : `<div class="text-[11px] text-brand-muted pl-8 py-1.5">No sessions yet</div>`;
 
     wrap.innerHTML = `
-      <div class="flex items-center gap-1 rounded-lg px-1 py-1">
-        <a href="/agent" class="flex-1 flex items-center gap-2 rounded-lg pl-8 pr-2 py-1.5 text-xs font-medium text-brand-gold hover:bg-brand-panel/70 transition-all">
+      <div id="agent-submenu" class="${expanded ? '' : 'hidden'} flex flex-col gap-0.5 mt-0.5 mb-1">
+        <a href="/agent" class="flex items-center gap-2 rounded-lg pl-8 pr-2 py-1.5 text-xs font-medium text-brand-gold hover:bg-brand-panel/70 transition-all">
           + New session
         </a>
-        <button id="agent-menu-toggle" class="p-1.5 text-brand-muted hover:text-brand-ink transition-transform" style="transform: rotate(${expanded ? '90' : '0'}deg)">
-          ${svgIcon('M9 5l7 7-7 7').replace('w-[18px] h-[18px]','w-3.5 h-3.5')}
-        </button>
-      </div>
-      <div id="agent-submenu" class="${expanded ? '' : 'hidden'} flex flex-col gap-0.5 mt-0.5 mb-1">
         ${sessionsHtml}
       </div>`;
 
@@ -370,7 +372,7 @@ function filterNav(me) {
   NAV_ITEMS.forEach((item) => {
     if (item.requires && !canRun(me, item.requires)) {
       const el = document.querySelector(`[data-nav-item="${item.path}"]`);
-      if (el) el.remove();
+      if (el) (el.parentElement || el).remove();
       if (item.path === '/agent') document.getElementById('agent-menu')?.remove();
     }
   });
