@@ -47,6 +47,22 @@ let currentOutputLine = null;
 
 function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
 
+// Color-codes tool-use lines by what they actually do, so a long run isn't
+// a wall of identical gray text — reuses the existing brand palette rather
+// than introducing new colors.
+const TOOL_COLOR = {
+  Bash: 'text-brand-teal',
+  Read: 'text-brand-gold',
+  Grep: 'text-brand-gold',
+  Glob: 'text-brand-gold',
+  Edit: 'text-brand-terracotta',
+  Write: 'text-brand-terracotta',
+  NotebookEdit: 'text-brand-terracotta',
+  WebFetch: 'text-blue-400',
+  WebSearch: 'text-blue-400',
+  TodoWrite: 'text-purple-400',
+};
+
 function setToolBadge(tool) {
   const badge = document.getElementById('tool-badge');
   if (!tool) { badge.classList.add('hidden'); return; }
@@ -104,11 +120,13 @@ function appendLine(type, data) {
     parts.forEach((p) => {
       const div = document.createElement('div');
       if (p.kind === 'text') {
-        div.className = 'text-brand-ink whitespace-pre-wrap break-words';
-        div.textContent = p.text;
+        div.className = 'flex gap-2 items-start';
+        div.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-brand-gold mt-1.5 shrink-0"></span>
+          <span class="text-brand-ink whitespace-pre-wrap break-words">${esc(p.text)}</span>`;
       } else {
-        div.className = 'text-brand-muted text-[12px]';
-        div.textContent = `→ running: ${p.name}`;
+        const color = TOOL_COLOR[p.name] || 'text-brand-teal';
+        div.className = `flex gap-2 items-center text-[12px] ${color}`;
+        div.innerHTML = `<span class="opacity-60">→</span> running: <span class="font-semibold">${esc(p.name)}</span>`;
       }
       term.appendChild(div);
     });
@@ -126,8 +144,14 @@ function appendLine(type, data) {
     div.className = 'bg-brand-terracotta/15 text-brand-terracotta border border-brand-terracotta/30 rounded-lg px-3 py-2';
     div.textContent = data;
   } else if (type === 'diff') {
+    const colored = esc(data).split('\n').map(line => {
+      if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="text-emerald-400">${line}</span>`;
+      if (line.startsWith('-') && !line.startsWith('---')) return `<span class="text-brand-terracotta">${line}</span>`;
+      if (line.startsWith('@@')) return `<span class="text-brand-teal">${line}</span>`;
+      return line;
+    }).join('\n');
     div.innerHTML = `<div class="text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1">Diff</div>
-      <pre class="bg-brand-navy2 border border-brand-border rounded-lg p-3 overflow-auto max-h-96 whitespace-pre-wrap text-brand-ink">${esc(data)}</pre>`;
+      <pre class="bg-brand-navy2 border border-brand-border rounded-lg p-3 overflow-auto max-h-96 whitespace-pre-wrap text-brand-ink">${colored}</pre>`;
   } else {
     div.className = 'text-brand-muted whitespace-pre-wrap break-words';
     div.textContent = data;
