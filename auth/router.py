@@ -39,6 +39,7 @@ def _set_session_cookie(response: Response, user: dict) -> None:
         value=token,
         httponly=True,
         samesite="lax",
+        secure=True,
         max_age=60 * 60 * 24 * 7,
         path="/",
     )
@@ -92,7 +93,7 @@ def auth0_start(request: Request) -> RedirectResponse:
     except Auth0Error as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     resp = RedirectResponse(url)
-    resp.set_cookie(_STATE_COOKIE, state, httponly=True, samesite="lax", max_age=600, path="/api/auth/auth0")
+    resp.set_cookie(_STATE_COOKIE, state, httponly=True, samesite="lax", secure=True, max_age=600, path="/api/auth/auth0")
     return resp
 
 

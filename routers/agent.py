@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 
 from auth.deps import require_session, require_session_ws
 from auth.permissions import PermissionDenied, require_permission
+from auth.rate_limit import codegen_limiter
 from core.agent_stream import run_agent_turn_stream, stop_session
 from db.agent_sessions import (
     add_event,
@@ -117,6 +118,14 @@ async def agent_ws(websocket: WebSocket, session_id: int) -> None:
                 continue
             prompt = (msg.get("prompt") or "").strip()
             if not prompt:
+                continue
+            retry_after = codegen_limiter.check(user["id"])
+            if retry_after is not None:
+                await websocket.send_json({
+                    "type": "error",
+                    "data": f"Too many sandbox turns — try again in {retry_after}s. "
+                            "This limit protects your Claude subscription quota from runaway use, not normal use.",
+                })
                 continue
             add_event(session_id, "prompt", prompt)
             await websocket.send_json({"type": "prompt", "data": prompt})

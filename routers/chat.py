@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth.deps import require_session
+from auth.rate_limit import chat_limiter
 from core.aiwebmaster_agent import AIwebmasterError, run_agent_turn
 from db.audit import log_event
 from db.chat_sessions import (
@@ -75,6 +76,14 @@ def chat(body: dict, request: Request) -> dict:
     messages = body.get("messages") or []
     if not messages:
         raise HTTPException(status_code=400, detail="messages is required")
+
+    retry_after = chat_limiter.check(request.state.user["id"])
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many chat messages — try again in {retry_after}s. This limit protects against runaway API cost, not normal use.",
+            headers={"Retry-After": str(retry_after)},
+        )
 
     # edit_context (from Browse's "open in chat" flow) is machine-readable
     # scaffolding for the model only — never persisted or shown to the user,

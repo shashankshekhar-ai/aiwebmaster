@@ -4,7 +4,10 @@ from typing import Any
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
     "docker_ops": {"docker", "git"},
-    "ui_editor": {"content", "nav_link", "code_edit", "codegen_agent", "docker"},
+    # codegen_agent/docker deliberately excluded: those spend the operator's
+    # own logged-in Claude subscription quota / touch running containers,
+    # which is a materially different risk tier than editing content.
+    "ui_editor": {"content", "nav_link", "code_edit"},
     "infra_admin": {"docker", "git", "sql", "code_edit", "codegen_agent"},
     "super_admin": {"docker", "git", "sql", "content", "nav_link", "user_management", "publish", "rollback", "code_edit", "codegen_agent"},
 }

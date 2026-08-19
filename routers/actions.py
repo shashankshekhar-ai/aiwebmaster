@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth.deps import require_session
 from auth.permissions import PermissionDenied, require_docker_env, require_permission
+from auth.rate_limit import codegen_limiter
 from core.aiwebmaster_agent import EXECUTABLE_TYPES
 from core.executors import EXECUTORS, ExecutionError
 from db.audit import log_event
@@ -38,6 +39,15 @@ def run_action(body: dict, request: Request) -> dict:
             require_docker_env(request.state.user, payload)
     except PermissionDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    if action_type == "codegen_agent":
+        retry_after = codegen_limiter.check(request.state.user["id"])
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many sandbox runs — try again in {retry_after}s. This limit protects your Claude subscription quota from runaway use, not normal use.",
+                headers={"Retry-After": str(retry_after)},
+            )
 
     executor = EXECUTORS.get(action_type)
     if executor is None:
