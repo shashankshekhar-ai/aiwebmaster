@@ -462,6 +462,24 @@ function friendlyResultSummary(a, ok, data) {
   return `${what} — failed.${why ? ' ' + String(why).slice(0, 300) : ''}`;
 }
 
+// Color per action type, so a chat with several proposed actions reads at
+// a glance instead of every card looking identical gold. Same restrained
+// brand palette used everywhere else — just applied more broadly.
+const ACTION_TYPE_COLOR = {
+  content: 'gold',
+  nav_link: 'gold',
+  docker: 'teal',
+  git: 'teal',
+  publish: 'teal',
+  rollback: 'teal',
+  sql: 'terracotta',
+  code_edit: 'terracotta',
+  codegen_agent: 'terracotta',
+  user_management: 'terracotta',
+  nginx: 'muted',
+  system: 'muted',
+};
+
 function addActions(actions) {
   actions.forEach((a, i) => {
     const permitted = a.executable && canRun(me, a.type);
@@ -469,8 +487,9 @@ function addActions(actions) {
     row.className = 'flex gap-3 max-w-[85%] self-start animate-fade-in-up';
     row.style.animationDelay = `${i * 60}ms`;
 
-    const borderClass = a.executable ? (permitted ? 'border-brand-gold/50' : 'border-brand-border') : 'border-brand-border border-dashed';
-    const badgeClass = a.executable ? 'bg-brand-gold/15 text-brand-gold' : 'bg-brand-panel2 text-brand-muted';
+    const accent = ACTION_TYPE_COLOR[a.type] || 'gold';
+    const borderClass = a.executable ? (permitted ? `border-brand-${accent}/50` : 'border-brand-border') : 'border-brand-border border-dashed';
+    const badgeClass = a.executable ? `bg-brand-${accent}/15 text-brand-${accent}` : 'bg-brand-panel2 text-brand-muted';
     const summary = friendlySummary(a);
     const payloadHtml = `<pre class="text-[11px] bg-brand-navy2 rounded-lg p-3 overflow-auto max-h-56 text-brand-muted">${JSON.stringify(a.payload, null, 2)}</pre>`;
 
