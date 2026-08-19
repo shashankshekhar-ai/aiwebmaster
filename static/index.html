@@ -627,7 +627,7 @@ async function submit() {
       body: JSON.stringify({ messages: history, session_id: currentSessionId, edit_context: pendingEditContext }),
     });
     removeTyping();
-    if (res.status === 401) { window.location.href = '/login'; return; }
+    if (res.status === 401) { await redirectToLogin(res); return; }
     const data = await res.json();
     if (!res.ok) { addMsg('assistant', 'Error: ' + (data.detail || res.status)); return; }
     if (data.session_id && data.session_id !== currentSessionId) {

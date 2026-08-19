@@ -40,7 +40,7 @@ function icon(d, extra) {
 
 async function api(path) {
   const res = await fetch('/api' + path);
-  if (res.status === 401) { window.location.href = '/login'; throw new Error('unauth'); }
+  if (res.status === 401) { await redirectToLogin(res); throw new Error('unauth'); }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     const raw = body.detail?.error || body.detail || `Server error (${res.status})`;

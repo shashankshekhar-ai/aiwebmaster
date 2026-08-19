@@ -1,3 +1,20 @@
+// Sends a stale/invalid/revoked session to /login with the real reason
+// (session_storage.py's SessionInvalid.message, surfaced via the 401's
+// JSON `detail`) instead of the previous silent bounce-with-no-explanation.
+// login.html already renders `?error=` (used for Auth0 failures) so this
+// just reuses that same convention rather than inventing a second one.
+function goToLogin(message) {
+  window.location.href = `/login?error=${encodeURIComponent(message || 'Please log in again.')}`;
+}
+async function redirectToLogin(res) {
+  let message;
+  try {
+    const data = await res.json();
+    if (data && data.detail) message = data.detail;
+  } catch (e) { /* non-JSON body — fall back to the generic message */ }
+  goToLogin(message);
+}
+
 // Shared app shell — sidebar nav + user card, identical across every page.
 // renderShell(activePath) returns the outer flex container's HTML; caller
 // injects it into #app-root and puts page content inside #page-content.
@@ -93,7 +110,7 @@ async function mountShell(activePath) {
   root.appendChild(shellWrap);
 
   const res = await fetch('/api/me');
-  if (!res.ok) { window.location.href = '/login'; return null; }
+  if (!res.ok) { await redirectToLogin(res); return null; }
   const me = await res.json();
 
   filterNav(me);

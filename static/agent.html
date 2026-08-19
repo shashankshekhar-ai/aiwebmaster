@@ -208,7 +208,20 @@ function connectWs(id) {
       mountAgentMenu('/agent');
     }
   };
-  ws.onclose = () => { setRunning(false); };
+  ws.onclose = (ev) => {
+    setRunning(false);
+    // 4401/4403/4404 are this app's own codes (auth/deps.py::require_session_ws,
+    // routers/agent.py) — a plain close with no code (1000/1006, normal
+    // disconnect/stop) needs no message.
+    if (ev.code === 4401) {
+      appendLine('error', ev.reason || 'Your session expired — please log in again.');
+      goToLogin(ev.reason);
+    } else if (ev.code === 4403) {
+      appendLine('error', 'You do not have permission to use Agent Terminal.');
+    } else if (ev.code === 4404) {
+      appendLine('error', 'This agent session no longer exists.');
+    }
+  };
   return opened;
 }
 
