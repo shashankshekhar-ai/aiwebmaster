@@ -8,10 +8,11 @@
 <script src="/assets/theme.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-brand-navy text-brand-ink font-sans antialiased">
-<div id="app-root"></div>
+<body class="bg-gradient-to-b from-brand-navy to-brand-navy2 text-brand-ink font-sans antialiased relative">
+<div class="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_15%_0%,rgba(63,163,154,.08),transparent_40%),radial-gradient(circle_at_85%_100%,rgba(245,185,63,.06),transparent_40%)]"></div>
+<div id="app-root" class="relative z-10"></div>
 
-<div id="page-content" class="flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+<div id="page-content" class="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
   <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur flex items-center justify-between animate-fade-in">
     <div>
       <h1 id="session-title" class="text-sm font-semibold">Agent Terminal</h1>

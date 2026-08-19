@@ -45,7 +45,7 @@ function renderShell(activePath) {
   }).join('');
 
   return `
-  <aside class="w-64 shrink-0 bg-brand-navy2/80 backdrop-blur border-r border-brand-border flex flex-col p-4 animate-fade-in-left">
+  <aside class="relative z-10 w-64 shrink-0 bg-brand-navy2/80 backdrop-blur border-r border-brand-border shadow-lift flex flex-col p-4 animate-fade-in-left">
     <div class="flex items-center gap-2.5 px-2 mb-1">
       <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-gold to-amber-600 flex items-center justify-center text-brand-navy font-black text-sm shadow-glow">A</div>
       <div>

@@ -23,7 +23,10 @@ window.tailwind.config = {
       },
       boxShadow: {
         panel: '0 1px 2px rgba(0,0,0,.2), 0 0 0 1px rgba(255,255,255,.02)',
+        lift: '0 8px 24px -8px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.3), 0 0 0 1px rgba(255,255,255,.03)',
         glow: '0 0 0 3px rgba(245,185,63,.15)',
+        'glow-teal': '0 0 0 3px rgba(63,163,154,.15)',
+        'glow-terracotta': '0 0 0 3px rgba(201,131,90,.15)',
       },
       keyframes: {
         fadeIn: { '0%': { opacity: 0 }, '100%': { opacity: 1 } },

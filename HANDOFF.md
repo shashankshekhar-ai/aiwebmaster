@@ -304,6 +304,16 @@ working via curl.
 
 ## Recently added, less thoroughly battle-tested
 
+- Visual polish pass across all 8 pages (`static/*.html`, `assets/theme.js`,
+  `assets/sidebar.js`): new `shadow-lift`/`glow-teal`/`glow-terracotta`
+  shadow tokens in `theme.js`; every page body now has the gradient-navy +
+  ambient radial-glow backdrop that `login.html` already had; `shadow-panel`
+  added to all card `<div>`s (settings, users, system, git, deploy); browse.html
+  card hover upgraded to `shadow-lift`; sidebar `<aside>` got `shadow-lift`.
+  Purely cosmetic (Tailwind class changes only, no JS/logic touched).
+  Rebuilt + force-recreated `aiwebmaster`, confirmed new classes present in
+  the served HTML via authenticated curl on `/` and `/settings` — not yet
+  eyeballed in a real browser.
 - Chat sessions (list/rename/delete, sidebar submenu) — DB-backed, works via
   curl tests, but see the open bug above for real-browser rendering.
 - Shared in-app dialog (`dialogPrompt`/`dialogConfirm`/`dialogAlert` in
