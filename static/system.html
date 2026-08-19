@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>AIwebmaster — System</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
-<script src="/assets/theme.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="/assets/theme.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
 <body class="bg-gradient-to-b from-brand-navy to-brand-navy2 text-brand-ink font-sans antialiased relative">
@@ -110,7 +110,7 @@ async function loadStats(first) {
         </div>
       </div>
 
-      <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up" style="animation-delay:200ms">
+      <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up mb-6" style="animation-delay:200ms">
         <div class="px-4 py-3 border-b border-brand-border text-sm font-semibold">Containers (this host, all projects)</div>
         <div class="overflow-x-auto">
           <table class="w-full text-left">
@@ -120,7 +120,13 @@ async function loadStats(first) {
             <tbody id="containers-tbody">${rows}</tbody>
           </table>
         </div>
+      </div>
+
+      <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up" style="animation-delay:240ms">
+        <div class="px-4 py-3 border-b border-brand-border text-sm font-semibold">Recent activity (proposed + executed actions, every user)</div>
+        <div id="activity-list" class="divide-y divide-brand-border/60"><div class="text-xs text-brand-muted px-4 py-3">Loading…</div></div>
       </div>`;
+      loadActivity();
 
     cpuChart = new Chart(document.getElementById('cpu-chart'), {
       type: 'bar',
@@ -153,6 +159,40 @@ async function loadStats(first) {
     cpuChart.update();
     diskChart.data.datasets[0].data = [diskPct, 100 - diskPct];
     diskChart.update();
+  }
+}
+
+function activityTimeAgo(iso) {
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (isNaN(s)) return '';
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+async function loadActivity() {
+  const el = document.getElementById('activity-list');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/deploy/activity?limit=40');
+    if (!res.ok) { el.innerHTML = `<div class="text-xs text-brand-muted px-4 py-3">Could not load activity (${res.status}).</div>`; return; }
+    const { activity } = await res.json();
+    if (!activity.length) { el.innerHTML = `<div class="text-xs text-brand-muted px-4 py-3">No activity recorded yet.</div>`; return; }
+    el.innerHTML = activity.map((a, i) => {
+      const executed = a.event === 'executed';
+      const dot = !executed ? 'bg-brand-gold' : (a.ok ? 'bg-emerald-400' : 'bg-brand-terracotta');
+      const label = !executed ? 'proposed' : (a.ok ? 'ran ok' : 'failed');
+      return `<div class="flex items-center gap-3 px-4 py-2.5 text-xs animate-fade-in" style="animation-delay:${Math.min(i * 15, 300)}ms">
+        <span class="w-1.5 h-1.5 rounded-full ${dot} shrink-0"></span>
+        <span class="font-mono text-brand-ink shrink-0">${a.action_type}</span>
+        <span class="text-brand-muted shrink-0">${label}</span>
+        <span class="text-brand-muted truncate flex-1">${(a.actor || 'unknown').replace(/</g, '&lt;')}</span>
+        <span class="text-brand-muted shrink-0">${activityTimeAgo(a.created_at)}</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="text-xs text-brand-muted px-4 py-3">Could not load activity: ${String(e)}</div>`;
   }
 }
 
