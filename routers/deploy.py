@@ -58,7 +58,7 @@ def deploy_status(request: Request) -> dict:
             continue
 
     def project_row(service: str) -> dict:
-        row = by_name.get(f"rewamped-site-{service}-1", {})
+        row = by_name.get(f"{settings.compose_project}-{service}-1", {})
         return {
             "service": service,
             "status": row.get("Status", "not created"),
