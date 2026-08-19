@@ -356,10 +356,18 @@ async function mountAgentMenu(activePath) {
 
 const ROLE_PERMISSIONS = {
   docker_ops: ['docker', 'git'],
-  ui_editor: ['content', 'nav_link', 'code_edit', 'codegen_agent'],
+  ui_editor: ['content', 'nav_link', 'code_edit', 'codegen_agent', 'docker'],
   infra_admin: ['docker', 'git', 'sql', 'code_edit', 'codegen_agent'],
   super_admin: ['docker', 'git', 'sql', 'content', 'nav_link', 'user_management', 'publish', 'rollback', 'code_edit', 'codegen_agent'],
 };
+// Mirrors auth/permissions.py's DOCKER_STAGING_ROLES — everyone else with
+// 'docker' permission (currently just ui_editor) is dev-only; the server
+// re-checks this regardless, this is just for not showing dead-end buttons.
+const DOCKER_STAGING_ROLES = ['docker_ops', 'infra_admin', 'super_admin'];
+function canRunDockerEnv(me, env) {
+  if (!canRun(me, 'docker')) return false;
+  return env !== 'staging' || DOCKER_STAGING_ROLES.includes(me.role);
+}
 function canRun(me, actionType) {
   return me && (ROLE_PERMISSIONS[me.role] || []).includes(actionType);
 }

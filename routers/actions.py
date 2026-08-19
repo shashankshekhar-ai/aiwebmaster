@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth.deps import require_session
-from auth.permissions import PermissionDenied, require_permission
+from auth.permissions import PermissionDenied, require_docker_env, require_permission
 from core.aiwebmaster_agent import EXECUTABLE_TYPES
 from core.executors import EXECUTORS, ExecutionError
 from db.audit import log_event
@@ -34,6 +34,8 @@ def run_action(body: dict, request: Request) -> dict:
 
     try:
         require_permission(request.state.user, action_type)
+        if action_type == "docker":
+            require_docker_env(request.state.user, payload)
     except PermissionDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 

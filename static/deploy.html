@@ -108,7 +108,6 @@ async function load(first) {
   }
   const status = await statusRes.json();
   const activityHtml = await loadActivity();
-  const canDeploy = canRun(me, 'docker');
 
   content.innerHTML = `
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mb-6">
@@ -121,20 +120,22 @@ async function load(first) {
       <div>${activityHtml}</div>
     </div>`;
 
-  if (canDeploy) {
-    document.querySelectorAll('.svc-actions').forEach(el => {
-      const env = el.dataset.env, service = el.dataset.service;
-      el.innerHTML = [
-        actionBtn('Start', 'start', 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'),
-        actionBtn('Stop', 'stop', 'bg-brand-terracotta/15 text-brand-terracotta hover:bg-brand-terracotta/25'),
-        actionBtn('Restart', 'restart', 'bg-brand-teal/15 text-brand-teal hover:bg-brand-teal/25'),
-        actionBtn('Rebuild', 'rebuild', 'bg-brand-gold/15 text-brand-gold hover:bg-brand-gold/25'),
-      ].join('');
-      el.querySelectorAll('button').forEach(btn => {
-        btn.onclick = () => runDockerOp(env, service, btn.dataset.op, btn);
-      });
+  document.querySelectorAll('.svc-actions').forEach(el => {
+    const env = el.dataset.env, service = el.dataset.service;
+    if (!canRunDockerEnv(me, env)) {
+      if (canRun(me, 'docker')) el.innerHTML = `<span class="text-[10px] text-brand-muted">dev only</span>`;
+      return;
+    }
+    el.innerHTML = [
+      actionBtn('Start', 'start', 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'),
+      actionBtn('Stop', 'stop', 'bg-brand-terracotta/15 text-brand-terracotta hover:bg-brand-terracotta/25'),
+      actionBtn('Restart', 'restart', 'bg-brand-teal/15 text-brand-teal hover:bg-brand-teal/25'),
+      actionBtn('Rebuild', 'rebuild', 'bg-brand-gold/15 text-brand-gold hover:bg-brand-gold/25'),
+    ].join('');
+    el.querySelectorAll('button').forEach(btn => {
+      btn.onclick = () => runDockerOp(env, service, btn.dataset.op, btn);
     });
-  }
+  });
 }
 
 (async () => {
