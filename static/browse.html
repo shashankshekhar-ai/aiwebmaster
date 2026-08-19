@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — Browse</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="/assets/theme.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-brand-navy text-brand-ink font-sans antialiased">
+<div id="app-root"></div>
+
+<div id="page-content" class="flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+  <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
+    <h1 class="text-sm font-semibold">Browse & edit</h1>
+    <div id="crumbs" class="text-xs text-brand-muted mt-1"></div>
+  </header>
+  <div id="view" class="flex-1 overflow-y-auto p-6"></div>
+</div>
+
+<script src="/assets/sidebar.js"></script>
+<script>
+const view = document.getElementById('view');
+const crumbs = document.getElementById('crumbs');
+let state = { level: 'apps', kind: null };
+
+const ICON = {
+  pages: 'M9 3v18M3 9h18M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z',
+  posts: 'M4 6h16M4 12h16M4 18h7',
+  resources: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
+  'case-studies': 'M9 19v-6a2 2 0 012-2h2a2 2 0 012 2v6m-6 0h6m-6 0H5a2 2 0 01-2-2V7a2 2 0 012-2h2m10 14h2a2 2 0 002-2V7a2 2 0 00-2-2h-2m-6 0V3m6 2V3',
+  navigation: 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7',
+};
+
+function icon(d, extra) {
+  return `<svg class="w-5 h-5 ${extra||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+}
+
+async function api(path) {
+  const res = await fetch('/api' + path);
+  if (res.status === 401) { window.location.href = '/login'; throw new Error('unauth'); }
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+  return res.json();
+}
+
+function renderCrumbs() {
+  const parts = [];
+  parts.push(state.level === 'apps' ? '<span class="text-brand-ink">Apps</span>' : `<button onclick="goApps()" class="hover:text-brand-gold transition-colors">Apps</button>`);
+  if (state.kind) parts.push(`<span class="text-brand-ink">${state.kind}</span>`);
+  crumbs.innerHTML = parts.join('<span class="mx-1.5 text-brand-border">/</span>');
+}
+
+function skeletonGrid() {
+  return `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${
+    Array(6).fill(0).map(() => '<div class="h-24 rounded-xl bg-brand-panel border border-brand-border animate-pulse"></div>').join('')
+  }</div>`;
+}
+
+async function goApps() {
+  state = { level: 'apps', kind: null };
+  renderCrumbs();
+  view.innerHTML = skeletonGrid();
+  const data = await api('/apps');
+  view.innerHTML = `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${data.kinds.map((k, i) =>
+    `<div onclick="goList('${k.kind}')"
+      class="group cursor-pointer bg-brand-panel border border-brand-border rounded-xl p-5 transition-all hover:border-brand-gold hover:-translate-y-0.5 hover:shadow-lg animate-fade-in-up"
+      style="animation-delay:${i*40}ms">
+      <div class="w-10 h-10 rounded-lg bg-brand-panel2 border border-brand-border flex items-center justify-center text-brand-gold mb-3 group-hover:scale-110 transition-transform">${icon(ICON[k.kind] || ICON.pages)}</div>
+      <div class="font-semibold text-sm">${k.label}</div>
+    </div>`
+  ).join('')}</div>`;
+}
+
+function openInChat(kind, docId) {
+  window.location.href = `/?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(docId)}`;
+}
+
+async function goList(kind) {
+  state = { level: 'list', kind };
+  renderCrumbs();
+  view.innerHTML = skeletonGrid();
+
+  const data = await api(`/content/${kind}`);
+  const docs = data.docs || [];
+  if (kind === 'navigation') docs.sort((a, b) => (a.location || '').localeCompare(b.location || '') || (a.order || 0) - (b.order || 0));
+
+  view.innerHTML = `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+    <div onclick="openInChat('${kind}', 'new')"
+      class="cursor-pointer border-2 border-dashed border-brand-border rounded-xl p-5 flex items-center justify-center text-brand-gold text-sm font-medium transition-all hover:border-brand-gold hover:bg-brand-panel/50 animate-fade-in-up">
+      ＋ New ${kind}
+    </div>
+    ${docs.map((d, i) => `<div id="card-${kind}-${d.id}"
+      class="group relative bg-brand-panel border border-brand-border rounded-xl p-5 transition-all hover:border-brand-gold hover:-translate-y-0.5 hover:shadow-lg animate-fade-in-up"
+      style="animation-delay:${(i+1)*30}ms">
+      ${kind === 'navigation' ? `<button onclick="event.stopPropagation(); removeNavLink('${(d.label||'').replace(/'/g,"\\'")}', '${d.location}', 'card-${kind}-${d.id}')"
+        class="absolute top-2 right-2 hidden group-hover:flex w-6 h-6 items-center justify-center rounded-md bg-brand-navy2 border border-brand-border text-brand-muted hover:text-brand-terracotta hover:border-brand-terracotta transition-all" title="Remove">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>` : ''}
+      <div onclick="openInChat('${kind}', '${d.id}')" class="cursor-pointer">
+        <div class="font-semibold text-sm truncate group-hover:text-brand-gold transition-colors pr-6">${(d.title || d.label || 'Untitled').replace(/</g, '&lt;')}</div>
+        <div class="text-xs text-brand-muted mt-1 truncate font-mono">${(d.slug || d.href || '').replace(/</g, '&lt;')}</div>
+        ${kind === 'navigation' ? `<div class="text-[10px] text-brand-muted mt-2 uppercase tracking-wider">${d.location} · order ${d.order ?? 0}</div>` : ''}
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+async function removeNavLink(label, location, cardId) {
+  if (!(await dialogConfirm(`Remove nav link "${label}" (${location})?`, { confirmText: 'Remove', danger: true }))) return;
+  try {
+    const res = await fetch('/api/actions/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'nav-remove-' + Date.now(), type: 'nav_link', payload: { label, location, remove: true } }),
+    });
+    if (!res.ok) { const d = await res.json(); await dialogAlert(d.detail?.error || d.detail || 'Failed to remove'); return; }
+    document.getElementById(cardId)?.remove();
+  } catch (e) {
+    await dialogAlert(String(e));
+  }
+}
+
+(async () => {
+  const me = await mountShell('/browse');
+  if (!me) return;
+  goApps();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — System</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="/assets/theme.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body class="bg-brand-navy text-brand-ink font-sans antialiased">
+<div id="app-root"></div>
+
+<div id="page-content" class="flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+  <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur flex items-center justify-between animate-fade-in">
+    <div>
+      <h1 class="text-sm font-semibold">System</h1>
+      <p class="text-xs text-brand-muted mt-0.5">Live docker &amp; host status.</p>
+    </div>
+    <div id="refresh-note" class="text-[11px] text-brand-muted flex items-center gap-1.5"></div>
+  </header>
+  <div id="content" class="flex-1 overflow-y-auto p-6"></div>
+</div>
+
+<script src="/assets/sidebar.js"></script>
+<script>
+let me = null;
+let cpuChart = null, diskChart = null;
+
+function parsePercent(s) { return parseFloat((s || '0').replace('%', '')) || 0; }
+function parseMemMB(s) {
+  // "123.4MiB / 2GiB" -> 123.4
+  const used = (s || '').split('/')[0].trim();
+  const m = used.match(/([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB)/i);
+  if (!m) return 0;
+  const val = parseFloat(m[1]); const unit = m[2].toLowerCase();
+  if (unit.startsWith('g')) return val * 1024;
+  if (unit.startsWith('k')) return val / 1024;
+  return val;
+}
+
+function skeleton() {
+  return `<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    ${Array(3).fill(0).map(() => '<div class="h-24 rounded-xl bg-brand-panel border border-brand-border animate-pulse"></div>').join('')}
+  </div><div class="h-64 rounded-xl bg-brand-panel border border-brand-border animate-pulse mt-6"></div>`;
+}
+
+async function loadStats(first) {
+  const [contRes, statsRes] = await Promise.all([fetch('/api/system/containers'), fetch('/api/system/stats')]);
+  const content = document.getElementById('content');
+  if (contRes.status === 403 || statsRes.status === 403) {
+    content.innerHTML = `<div class="max-w-md mx-auto mt-16 text-center animate-fade-in-up">
+      <div class="text-sm text-brand-muted">Your role (${me.role}) can't view system status — needs docker access.</div>
+    </div>`;
+    return;
+  }
+  const containers = (await contRes.json()).containers || [];
+  const stats = await statsRes.json();
+  const statsByName = {};
+  (stats.container_stats || []).forEach(s => { statsByName[s.Name] = s; });
+
+  const up = containers.filter(c => (c.State || '').toLowerCase() === 'running').length;
+  const diskMatch = (stats.disk || '').match(/(\d+)%/);
+  const diskPct = diskMatch ? parseInt(diskMatch[1]) : 0;
+  const load = (stats.loadavg || '').split(' ').slice(0, 3);
+
+  const topByCpu = Object.values(statsByName)
+    .sort((a, b) => parsePercent(b.CPUPerc) - parsePercent(a.CPUPerc))
+    .slice(0, 8);
+
+  const rows = containers.map((c, i) => {
+    const s = statsByName[c.Names] || {};
+    const running = (c.State || '').toLowerCase() === 'running';
+    return `<tr class="border-b border-brand-border/60 hover:bg-brand-panel/60 transition-colors animate-fade-in" style="animation-delay:${Math.min(i*15,300)}ms">
+      <td class="py-2.5 px-4"><span class="inline-flex items-center gap-2 text-sm"><span class="w-1.5 h-1.5 rounded-full ${running ? 'bg-emerald-400 animate-pulse-dot' : 'bg-brand-terracotta'}"></span>${c.Names}</span></td>
+      <td class="py-2.5 px-4 text-xs text-brand-muted font-mono truncate max-w-[200px]">${(c.Image || '').slice(0, 36)}</td>
+      <td class="py-2.5 px-4 text-xs text-brand-muted">${c.Status || ''}</td>
+      <td class="py-2.5 px-4 text-xs font-mono">${s.CPUPerc || '—'}</td>
+      <td class="py-2.5 px-4 text-xs font-mono">${s.MemUsage || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  if (first) {
+    content.innerHTML = `
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div class="bg-brand-panel border border-brand-border rounded-xl p-5 animate-fade-in-up">
+          <div class="text-xs text-brand-muted mb-1">Containers running</div>
+          <div class="text-2xl font-bold"><span id="stat-up">${up}</span> <span class="text-brand-muted text-base font-normal">/ ${containers.length}</span></div>
+        </div>
+        <div class="bg-brand-panel border border-brand-border rounded-xl p-5 animate-fade-in-up" style="animation-delay:40ms">
+          <div class="text-xs text-brand-muted mb-1">Load average (1m / 5m / 15m)</div>
+          <div id="stat-load" class="text-2xl font-bold font-mono">${load.join(' / ')}</div>
+        </div>
+        <div class="bg-brand-panel border border-brand-border rounded-xl p-5 animate-fade-in-up" style="animation-delay:80ms">
+          <div class="text-xs text-brand-muted mb-1">Disk usage (repo mount)</div>
+          <div id="stat-disk" class="text-2xl font-bold">${diskPct}%</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        <div class="lg:col-span-2 bg-brand-panel border border-brand-border rounded-xl p-5 animate-fade-in-up" style="animation-delay:120ms">
+          <h2 class="text-sm font-semibold mb-3">Top containers by CPU</h2>
+          <canvas id="cpu-chart" height="140"></canvas>
+        </div>
+        <div class="bg-brand-panel border border-brand-border rounded-xl p-5 animate-fade-in-up" style="animation-delay:160ms">
+          <h2 class="text-sm font-semibold mb-3">Disk usage</h2>
+          <canvas id="disk-chart" height="140"></canvas>
+        </div>
+      </div>
+
+      <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden animate-fade-in-up" style="animation-delay:200ms">
+        <div class="px-4 py-3 border-b border-brand-border text-sm font-semibold">Containers (this host, all projects)</div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left">
+            <thead><tr class="border-b border-brand-border text-[11px] uppercase tracking-wider text-brand-muted">
+              <th class="py-2.5 px-4 font-semibold">Name</th><th class="py-2.5 px-4 font-semibold">Image</th><th class="py-2.5 px-4 font-semibold">Status</th><th class="py-2.5 px-4 font-semibold">CPU</th><th class="py-2.5 px-4 font-semibold">Memory</th>
+            </tr></thead>
+            <tbody id="containers-tbody">${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    cpuChart = new Chart(document.getElementById('cpu-chart'), {
+      type: 'bar',
+      data: {
+        labels: topByCpu.map(s => s.Name),
+        datasets: [{ data: topByCpu.map(s => parsePercent(s.CPUPerc)), backgroundColor: '#f5b93f', borderRadius: 4, maxBarThickness: 22 }],
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#8ba3b6', font: { size: 10 } }, grid: { color: '#20415e' } },
+          y: { ticks: { color: '#8ba3b6', font: { size: 10 } }, grid: { display: false } },
+        },
+      },
+    });
+
+    diskChart = new Chart(document.getElementById('disk-chart'), {
+      type: 'doughnut',
+      data: { labels: ['Used', 'Free'], datasets: [{ data: [diskPct, 100 - diskPct], backgroundColor: [diskPct > 85 ? '#c9835a' : '#3fa39a', '#20415e'], borderColor: '#122f4a', borderWidth: 3 }] },
+      options: { plugins: { legend: { display: false } }, cutout: '72%' },
+    });
+  } else {
+    document.getElementById('stat-up').textContent = up;
+    document.getElementById('stat-load').textContent = load.join(' / ');
+    document.getElementById('stat-disk').textContent = diskPct + '%';
+    document.getElementById('containers-tbody').innerHTML = rows;
+    cpuChart.data.labels = topByCpu.map(s => s.Name);
+    cpuChart.data.datasets[0].data = topByCpu.map(s => parsePercent(s.CPUPerc));
+    cpuChart.update();
+    diskChart.data.datasets[0].data = [diskPct, 100 - diskPct];
+    diskChart.update();
+  }
+}
+
+async function init() {
+  me = await mountShell('/system');
+  if (!me) return;
+  document.getElementById('content').innerHTML = skeleton();
+  document.getElementById('refresh-note').innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot"></span>Auto-refreshes every 10s`;
+  await loadStats(true);
+  setInterval(() => loadStats(false), 10000);
+}
+init();
+</script>
+</body>
+</html>

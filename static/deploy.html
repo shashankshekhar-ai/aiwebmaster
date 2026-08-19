@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — Deploy</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="/assets/theme.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-brand-navy text-brand-ink font-sans antialiased">
+<div id="app-root"></div>
+
+<div id="page-content" class="flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+  <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
+    <h1 class="text-sm font-semibold">Deploy</h1>
+    <p class="text-xs text-brand-muted mt-0.5">Start, stop, restart, or rebuild each service. Every action here executes immediately after you confirm.</p>
+  </header>
+  <div id="content" class="flex-1 overflow-y-auto p-6"></div>
+</div>
+
+<script src="/assets/sidebar.js"></script>
+<script>
+let me = null;
+
+const STATE_COLOR = { running: 'bg-emerald-400', exited: 'bg-brand-terracotta', absent: 'bg-brand-muted', restarting: 'bg-brand-gold' };
+const EVENT_COLOR = { executed: 'bg-brand-gold/15 text-brand-gold', proposed: 'bg-brand-teal/15 text-brand-teal' };
+
+function skeleton() {
+  return `<div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl">
+    ${Array(2).fill(0).map(() => '<div class="h-56 rounded-xl bg-brand-panel border border-brand-border animate-pulse"></div>').join('')}
+  </div>`;
+}
+
+function serviceCard(env, envLabel, services) {
+  return `<div class="bg-brand-panel border border-brand-border rounded-xl p-5">
+    <h2 class="text-sm font-semibold mb-4">${envLabel}</h2>
+    <div class="space-y-3">
+      ${services.map(s => `<div id="svc-${env}-${s.service}" class="flex items-center justify-between gap-2 py-1">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full ${STATE_COLOR[s.state] || 'bg-brand-muted'} ${s.state === 'running' ? 'animate-pulse-dot' : ''}"></span>
+            <span class="text-sm font-medium">${s.service}</span>
+          </div>
+          <div class="text-[11px] text-brand-muted ml-4 truncate">${s.status}</div>
+        </div>
+        <div class="flex items-center gap-1 shrink-0 svc-actions" data-env="${env}" data-service="${s.service}"></div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function actionBtn(label, op, cls) {
+  return `<button data-op="${op}" class="px-2 py-1 rounded-md text-[11px] font-medium transition-all ${cls}">${label}</button>`;
+}
+
+async function runDockerOp(env, service, op, btn) {
+  const labels = { start: 'Start', stop: 'Stop', restart: 'Restart', rebuild: 'Rebuild' };
+  const confirmed = await dialogConfirm(
+    `${labels[op]} "${service}" (${env})?${op === 'rebuild' ? ' This rebuilds the image first, can take a few minutes.' : ''}`,
+    { confirmText: labels[op], danger: op === 'stop' }
+  );
+  if (!confirmed) return;
+  const group = btn.parentElement;
+  group.querySelectorAll('button').forEach(b => b.disabled = true);
+  const original = btn.textContent;
+  btn.textContent = '…';
+  try {
+    const res = await fetch('/api/actions/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'deploy-' + Date.now(), type: 'docker', payload: { env, op, services: [service] } }),
+    });
+    const data = await res.json();
+    if (!res.ok) await dialogAlert(data.detail?.error || JSON.stringify(data.detail) || 'Failed');
+  } catch (e) {
+    await dialogAlert(String(e));
+  }
+  await load(false);
+}
+
+async function loadActivity() {
+  const res = await fetch('/api/deploy/activity');
+  if (!res.ok) return '';
+  const { activity } = await res.json();
+  if (!activity.length) return `<div class="text-xs text-brand-muted py-2">No activity yet.</div>`;
+  return activity.map((a, i) => `<div class="flex items-start gap-3 py-2 border-b border-brand-border/60 last:border-0 animate-fade-in" style="animation-delay:${Math.min(i*15,300)}ms">
+      <span class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${EVENT_COLOR[a.event] || 'bg-brand-panel2 text-brand-muted'}">${a.event}</span>
+      <div class="min-w-0 flex-1">
+        <div class="text-xs"><span class="font-medium">${a.action_type}</span>${a.actor ? ` · ${a.actor}` : ''} ${a.ok === false ? '<span class="text-brand-terracotta">· failed</span>' : ''}</div>
+        <div class="text-[10px] text-brand-muted mt-0.5 font-mono truncate">${JSON.stringify(a.payload || {}).slice(0, 120).replace(/</g,'&lt;')}</div>
+      </div>
+      <div class="text-[10px] text-brand-muted shrink-0">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</div>
+    </div>`).join('');
+}
+
+async function load(first) {
+  const content = document.getElementById('content');
+  if (first) content.innerHTML = skeleton();
+
+  const statusRes = await fetch('/api/deploy/status');
+  if (statusRes.status === 403) {
+    content.innerHTML = `<div class="max-w-md mx-auto mt-16 text-center animate-fade-in-up">
+      <div class="text-sm text-brand-muted">Your role (${me.role}) can't manage deployments — needs docker access.</div>
+    </div>`;
+    return;
+  }
+  const status = await statusRes.json();
+  const activityHtml = await loadActivity();
+  const canDeploy = canRun(me, 'docker');
+
+  content.innerHTML = `
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mb-6">
+      ${serviceCard('dev', 'Development', status.dev)}
+      ${serviceCard('staging', 'Staging', status.staging)}
+    </div>
+    <div class="max-w-4xl bg-brand-panel border border-brand-border rounded-xl p-5">
+      <h2 class="text-sm font-semibold mb-1">Recent activity</h2>
+      <p class="text-[11px] text-brand-muted mb-3">Every proposed and executed action across chat, browse, and this page.</p>
+      <div>${activityHtml}</div>
+    </div>`;
+
+  if (canDeploy) {
+    document.querySelectorAll('.svc-actions').forEach(el => {
+      const env = el.dataset.env, service = el.dataset.service;
+      el.innerHTML = [
+        actionBtn('Start', 'start', 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'),
+        actionBtn('Stop', 'stop', 'bg-brand-terracotta/15 text-brand-terracotta hover:bg-brand-terracotta/25'),
+        actionBtn('Restart', 'restart', 'bg-brand-teal/15 text-brand-teal hover:bg-brand-teal/25'),
+        actionBtn('Rebuild', 'rebuild', 'bg-brand-gold/15 text-brand-gold hover:bg-brand-gold/25'),
+      ].join('');
+      el.querySelectorAll('button').forEach(btn => {
+        btn.onclick = () => runDockerOp(env, service, btn.dataset.op, btn);
+      });
+    });
+  }
+}
+
+(async () => {
+  me = await mountShell('/deploy');
+  if (!me) return;
+  await load(true);
+  setInterval(() => load(false), 15000);
+})();
+</script>
+</body>
+</html>

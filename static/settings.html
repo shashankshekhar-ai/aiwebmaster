@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — Settings</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="/assets/theme.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-brand-navy text-brand-ink font-sans antialiased">
+<div id="app-root"></div>
+
+<div id="page-content" class="flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+  <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
+    <h1 class="text-sm font-semibold">Settings</h1>
+    <p class="text-xs text-brand-muted mt-0.5">AI provider used for chat.</p>
+  </header>
+  <div id="content" class="flex-1 overflow-y-auto p-6"></div>
+</div>
+
+<script src="/assets/sidebar.js"></script>
+<script>
+const PROVIDER_LABELS = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI (Codex / GPT)', gemini: 'Google (Gemini)' };
+
+async function load() {
+  const me = await mountShell('/settings');
+  if (!me) return;
+
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="h-64 rounded-xl bg-brand-panel border border-brand-border animate-pulse max-w-lg"></div>`;
+
+  const res = await fetch('/api/settings/ai');
+  if (res.status === 403) {
+    content.innerHTML = `<div class="max-w-md mx-auto mt-16 text-center animate-fade-in-up">
+      <div class="text-sm text-brand-muted">Your role (${me.role}) can't manage AI settings — only <span class="text-brand-ink font-medium">super_admin</span> can.</div>
+    </div>`;
+    return;
+  }
+  const data = await res.json();
+
+  const current = data.configured
+    ? `Currently using <span class="text-brand-ink font-medium">${PROVIDER_LABELS[data.provider]}</span> — model <span class="text-brand-ink font-mono">${data.model}</span>, key <span class="text-brand-ink font-mono">${data.api_key_masked}</span>.`
+    : `Not configured yet — falling back to env vars (<span class="font-mono">AI_PROVIDER</span> / <span class="font-mono">ANTHROPIC_API_KEY</span> / <span class="font-mono">GEMINI_API_KEY</span>).`;
+
+  const options = data.providers.map(p => `<option value="${p}">${PROVIDER_LABELS[p] || p}</option>`).join('');
+
+  content.innerHTML = `
+    <div class="max-w-lg bg-brand-panel border border-brand-border rounded-xl p-6 animate-fade-in-up">
+      <div class="text-xs text-brand-muted mb-6 leading-relaxed">${current}</div>
+
+      <label class="block text-xs font-medium text-brand-muted mb-1.5">Provider</label>
+      <select id="f-provider" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-4">${options}</select>
+
+      <label class="block text-xs font-medium text-brand-muted mb-1.5">API key</label>
+      <div class="flex gap-2 mb-4">
+        <input id="f-key" type="password" placeholder="sk-… / AIza… / etc"
+          class="flex-1 px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all" />
+        <button id="f-fetch" class="px-3.5 py-2 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold whitespace-nowrap">Fetch models</button>
+      </div>
+
+      <label class="block text-xs font-medium text-brand-muted mb-1.5">Model</label>
+      <select id="f-model" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-2">
+        <option value="">Fetch models first, or type below</option>
+      </select>
+      <input id="f-model-manual" type="text" placeholder="or type a model name manually"
+        class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-5" />
+
+      <button id="f-save" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-sm font-semibold transition-all hover:brightness-105 active:scale-[.98]">Save</button>
+      <div id="result" class="text-xs text-brand-muted mt-3"></div>
+    </div>`;
+
+  document.getElementById('f-fetch').onclick = async () => {
+    const provider = document.getElementById('f-provider').value;
+    const apiKey = document.getElementById('f-key').value;
+    const result = document.getElementById('result');
+    if (!apiKey) { result.textContent = 'Enter an API key first.'; return; }
+    result.textContent = 'Fetching models…';
+    try {
+      const r = await fetch(`/api/settings/ai/models?provider=${provider}&api_key=${encodeURIComponent(apiKey)}`);
+      const d = await r.json();
+      if (!r.ok) { result.textContent = d.detail || 'Failed to fetch models.'; return; }
+      const sel = document.getElementById('f-model');
+      sel.innerHTML = d.models.map(m => `<option value="${m}">${m}</option>`).join('');
+      result.textContent = `Found ${d.models.length} models.`;
+    } catch (e) {
+      result.textContent = String(e);
+    }
+  };
+
+  document.getElementById('f-save').onclick = async () => {
+    const provider = document.getElementById('f-provider').value;
+    const apiKey = document.getElementById('f-key').value;
+    const model = document.getElementById('f-model-manual').value || document.getElementById('f-model').value;
+    const result = document.getElementById('result');
+    if (!apiKey || !model) { result.textContent = 'API key and model are required.'; return; }
+    result.textContent = 'Saving…';
+    try {
+      const r = await fetch('/api/settings/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model, api_key: apiKey }),
+      });
+      const d = await r.json();
+      result.textContent = r.ok ? 'Saved. Chat will use this from the next message on.' : (d.detail || 'Save failed.');
+      if (r.ok) load();
+    } catch (e) {
+      result.textContent = String(e);
+    }
+  };
+}
+load();
+</script>
+</body>
+</html>

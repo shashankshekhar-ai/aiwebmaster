@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — Agent Terminal</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="/assets/theme.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-brand-navy text-brand-ink font-sans antialiased">
+<div id="app-root"></div>
+
+<div id="page-content" class="flex-1 flex min-w-0 overflow-hidden h-screen">
+  <aside class="w-64 shrink-0 border-r border-brand-border flex flex-col p-3 overflow-y-auto">
+    <button id="new-session-btn" class="w-full mb-3 px-3 py-2 rounded-lg bg-brand-gold/15 text-brand-gold text-xs font-semibold hover:bg-brand-gold/25 transition-all">+ New session</button>
+    <div id="session-list" class="flex flex-col gap-0.5"></div>
+  </aside>
+
+  <div class="flex-1 flex flex-col min-w-0">
+    <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur flex items-center justify-between">
+      <div>
+        <h1 id="session-title" class="text-sm font-semibold">Agent Terminal</h1>
+        <p class="text-xs text-brand-muted mt-0.5">Drives claude-agent/codex-agent directly — full file-edit + bash, isolated dev-only sandbox, no prod/db/docker-socket reach.</p>
+      </div>
+      <span id="tool-badge" class="hidden text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-brand-panel2 text-brand-muted"></span>
+    </header>
+
+    <div id="term" class="flex-1 overflow-y-auto p-4 font-mono text-[12px] leading-relaxed space-y-1"></div>
+
+    <div id="denied" class="hidden flex-1 flex items-center justify-center text-sm text-brand-terracotta">Your role can't access the Agent Terminal — needs infra_admin or super_admin.</div>
+
+    <div id="composer" class="border-t border-brand-border p-3 flex gap-2 items-end">
+      <textarea id="prompt-input" rows="2" placeholder="Describe the change… (Enter to send, Shift+Enter for newline)"
+        class="flex-1 resize-none px-3 py-2 rounded-lg bg-brand-panel border border-brand-border text-sm outline-none focus:border-brand-gold transition-all"></textarea>
+      <button id="send-btn" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-xs font-semibold hover:brightness-105 active:scale-[.97] transition-all disabled:opacity-50">Send</button>
+      <button id="stop-btn" class="hidden px-4 py-2 rounded-lg bg-brand-terracotta/20 text-brand-terracotta text-xs font-semibold hover:bg-brand-terracotta/30 transition-all">Stop</button>
+    </div>
+  </div>
+</div>
+
+<script src="/assets/sidebar.js"></script>
+<script>
+let me = null;
+let currentSessionId = null;
+let ws = null;
+let running = false;
+let currentOutputLine = null;
+
+function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function timeAgo(iso) {
+  const s = Math.floor((Date.now() - new Date(iso.replace(' ', 'T'))) / 1000);
+  if (isNaN(s)) return '';
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return Math.floor(s / 86400) + 'd';
+}
+
+async function loadSessions() {
+  const list = document.getElementById('session-list');
+  const res = await fetch('/api/agent/sessions');
+  if (res.status === 403) { document.getElementById('denied').classList.remove('hidden'); document.getElementById('composer').classList.add('hidden'); return []; }
+  const { sessions } = await res.json();
+  list.innerHTML = sessions.length
+    ? sessions.map(s => `
+      <div class="group flex items-center gap-1 rounded-lg pl-3 pr-1.5 py-1.5 text-xs cursor-pointer transition-all
+        ${s.id === currentSessionId ? 'bg-brand-panel2 text-brand-ink' : 'text-brand-muted hover:bg-brand-panel/70 hover:text-brand-ink'}"
+        data-open="${s.id}">
+        <span class="flex-1 truncate" title="${esc(s.title)}">${esc(s.title)}</span>
+        ${s.tool ? `<span class="text-[9px] px-1 py-0.5 rounded bg-brand-panel2 text-brand-muted shrink-0">${s.tool}</span>` : ''}
+        <span class="text-[9px] text-brand-muted shrink-0">${timeAgo(s.updated_at)}</span>
+        <button data-delete="${s.id}" class="hidden group-hover:inline text-brand-muted hover:text-brand-terracotta text-xs shrink-0 px-1">✕</button>
+      </div>`).join('')
+    : `<div class="text-[11px] text-brand-muted px-3 py-2">No sessions yet</div>`;
+
+  list.querySelectorAll('[data-open]').forEach(el => {
+    el.onclick = (e) => { if (e.target.dataset.delete) return; openSession(parseInt(el.dataset.open)); };
+  });
+  list.querySelectorAll('[data-delete]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.delete;
+      if (!(await dialogConfirm('Delete this session? This cannot be undone.', { confirmText: 'Delete', danger: true }))) return;
+      await fetch(`/api/agent/sessions/${id}`, { method: 'DELETE' });
+      if (String(currentSessionId) === id) { currentSessionId = null; document.getElementById('term').innerHTML = ''; setToolBadge(null); }
+      loadSessions();
+    };
+  });
+  return sessions;
+}
+
+function setToolBadge(tool) {
+  const badge = document.getElementById('tool-badge');
+  if (!tool) { badge.classList.add('hidden'); return; }
+  badge.textContent = tool;
+  badge.classList.remove('hidden');
+}
+
+// Sandbox output arrives as raw JSONL (claude-agent/codex-agent's own
+// stream-json, tee'd straight through — the two CLIs have different event
+// shapes, so re-parsing per-CLI isn't worth it, see connectWs's comment).
+// Most of it is real telemetry noise for a human reader (tool-call args
+// twice over, rate-limit/thinking-token counters, system/init blobs) — pull
+// out the two things a person actually wants (what it said, what it ran)
+// and collapse consecutive noise lines into one small toggle instead of a
+// wall of JSON. Falls back to the raw line if a CLI's shape doesn't match.
+let noiseBuffer = null; // currently-open collapsible <details> for a run of noise lines
+
+function parseOutputLine(raw) {
+  let ev;
+  try { ev = JSON.parse(raw); } catch (e) { return null; }
+  if (!ev || typeof ev !== 'object') return null;
+  if (ev.type === 'assistant' && ev.message && Array.isArray(ev.message.content)) {
+    const parts = [];
+    for (const block of ev.message.content) {
+      if (block.type === 'text' && block.text) parts.push({ kind: 'text', text: block.text });
+      else if (block.type === 'tool_use') parts.push({ kind: 'tool', name: block.name, input: block.input });
+    }
+    return parts.length ? parts : null;
+  }
+  return null;
+}
+
+function appendLine(type, data) {
+  const term = document.getElementById('term');
+
+  if (type === 'output') {
+    const parts = parseOutputLine(data);
+    if (!parts) {
+      // Noise (system/rate-limit/thinking-token/tool-result/etc) — group
+      // consecutive noise lines under one small toggle rather than one row each.
+      if (!noiseBuffer) {
+        const details = document.createElement('details');
+        details.className = 'text-[11px]';
+        details.innerHTML = '<summary class="text-brand-muted cursor-pointer hover:text-brand-ink">…</summary>';
+        noiseBuffer = document.createElement('pre');
+        noiseBuffer.className = 'bg-brand-navy2 border border-brand-border rounded-lg p-2 mt-1 overflow-auto max-h-56 whitespace-pre-wrap text-brand-muted';
+        details.appendChild(noiseBuffer);
+        term.appendChild(details);
+      }
+      noiseBuffer.textContent += (noiseBuffer.textContent ? '\n' : '') + data;
+      term.scrollTop = term.scrollHeight;
+      return;
+    }
+    noiseBuffer = null;
+    parts.forEach((p) => {
+      const div = document.createElement('div');
+      if (p.kind === 'text') {
+        div.className = 'text-brand-ink whitespace-pre-wrap break-words';
+        div.textContent = p.text;
+      } else {
+        div.className = 'text-brand-muted text-[12px]';
+        div.textContent = `→ running: ${p.name}`;
+      }
+      term.appendChild(div);
+    });
+    term.scrollTop = term.scrollHeight;
+    return;
+  }
+
+  noiseBuffer = null;
+  const div = document.createElement('div');
+  currentOutputLine = null;
+  if (type === 'prompt') {
+    div.className = 'self-end max-w-[80%] ml-auto bg-brand-gold/10 border border-brand-gold/30 rounded-lg px-3 py-2 text-brand-ink whitespace-pre-wrap';
+    div.textContent = data;
+  } else if (type === 'error') {
+    div.className = 'bg-brand-terracotta/15 text-brand-terracotta border border-brand-terracotta/30 rounded-lg px-3 py-2';
+    div.textContent = data;
+  } else if (type === 'diff') {
+    div.innerHTML = `<div class="text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-1">Diff</div>
+      <pre class="bg-brand-navy2 border border-brand-border rounded-lg p-3 overflow-auto max-h-96 whitespace-pre-wrap text-brand-ink">${esc(data)}</pre>`;
+  } else {
+    div.className = 'text-brand-muted whitespace-pre-wrap break-words';
+    div.textContent = data;
+  }
+  term.appendChild(div);
+  term.scrollTop = term.scrollHeight;
+}
+
+function setRunning(state) {
+  running = state;
+  document.getElementById('send-btn').disabled = state;
+  document.getElementById('send-btn').textContent = state ? 'Running…' : 'Send';
+  document.getElementById('stop-btn').classList.toggle('hidden', !state);
+}
+
+async function openSession(id) {
+  currentSessionId = id;
+  setRunning(false);
+  const term = document.getElementById('term');
+  term.innerHTML = '<div class="text-brand-muted text-xs animate-pulse">Loading…</div>';
+  const res = await fetch(`/api/agent/sessions/${id}`);
+  if (!res.ok) { term.innerHTML = ''; return; }
+  const { session, events } = await res.json();
+  document.getElementById('session-title').textContent = session.title;
+  setToolBadge(session.tool);
+  term.innerHTML = '';
+  events.forEach(e => appendLine(e.type, e.content));
+  loadSessions();
+  connectWs(id);
+}
+
+function connectWs(id) {
+  if (ws) { ws.onclose = null; ws.close(); }
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  ws = new WebSocket(`${proto}${location.host}/api/agent/ws/${id}`);
+  const opened = new Promise((resolve) => { ws.addEventListener('open', () => resolve(), { once: true }); });
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'output') {
+      // Raw JSONL lines from the sandbox CLI, same event format tee'd to
+      // /transcripts — appendLine('output', ...) pulls out text/tool-use
+      // for readability and collapses the rest (see its own comment).
+      appendLine('output', msg.data);
+    } else if (msg.type === 'prompt') {
+      appendLine('prompt', msg.data);
+    } else if (msg.type === 'diff') {
+      appendLine('diff', msg.data);
+      setToolBadge(msg.tool);
+    } else if (msg.type === 'error') {
+      appendLine('error', msg.data);
+    } else if (msg.type === 'done') {
+      setRunning(false);
+      loadSessions();
+    }
+  };
+  ws.onclose = () => { setRunning(false); };
+  return opened;
+}
+
+document.getElementById('new-session-btn').onclick = async () => {
+  const res = await fetch('/api/agent/sessions', { method: 'POST' });
+  if (!res.ok) return;
+  const s = await res.json();
+  await loadSessions();
+  openSession(s.id);
+};
+
+document.getElementById('send-btn').onclick = async () => {
+  const input = document.getElementById('prompt-input');
+  const prompt = input.value.trim();
+  if (!prompt || running) return;
+  if (!currentSessionId) {
+    const res = await fetch('/api/agent/sessions', { method: 'POST' });
+    if (!res.ok) return;
+    const s = await res.json();
+    currentSessionId = s.id;
+    await connectWs(s.id);
+    await loadSessions();
+  }
+  input.value = '';
+  setRunning(true);
+  ws.send(JSON.stringify({ prompt }));
+};
+
+document.getElementById('prompt-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('send-btn').click(); }
+});
+
+document.getElementById('stop-btn').onclick = () => {
+  if (ws) ws.send(JSON.stringify({ stop: true }));
+};
+
+(async () => {
+  me = await mountShell('/agent');
+  if (!me) return;
+  const sessions = await loadSessions();
+  if (sessions.length) openSession(sessions[0].id);
+})();
+</script>
+</body>
+</html>

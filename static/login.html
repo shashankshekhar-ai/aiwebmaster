@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — Log in</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="/assets/theme.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-brand-navy text-brand-ink font-sans antialiased flex items-center justify-center relative overflow-hidden">
+  <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(63,163,154,.18),transparent_45%),radial-gradient(circle_at_80%_75%,rgba(245,185,63,.10),transparent_40%)]"></div>
+
+  <div class="relative w-[380px] animate-pop-in">
+    <div class="flex items-center justify-center gap-2.5 mb-8">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-gold to-amber-600 flex items-center justify-center text-brand-navy font-black shadow-glow">A</div>
+      <div class="text-xl font-bold tracking-tight">AI<span class="text-brand-gold">webmaster</span></div>
+    </div>
+
+    <div class="bg-brand-panel/90 backdrop-blur border border-brand-border rounded-2xl p-8 shadow-2xl">
+      <div class="text-xs text-brand-muted text-center mb-6 uppercase tracking-wider">The Bradbury Group &middot; Site Agent</div>
+
+      <form id="form" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-brand-muted mb-1.5" for="email">Email</label>
+          <input id="email" type="email" autocomplete="username" required
+            class="w-full px-3.5 py-2.5 rounded-lg bg-brand-navy2 border border-brand-border text-sm text-brand-ink placeholder-brand-muted/60 outline-none transition-all focus:border-brand-gold focus:shadow-glow" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-brand-muted mb-1.5" for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" required
+            class="w-full px-3.5 py-2.5 rounded-lg bg-brand-navy2 border border-brand-border text-sm text-brand-ink outline-none transition-all focus:border-brand-gold focus:shadow-glow" />
+        </div>
+        <button type="submit"
+          class="w-full py-2.5 rounded-lg bg-brand-gold text-brand-navy font-semibold text-sm transition-all hover:brightness-105 hover:shadow-glow active:scale-[.98]">
+          Log in
+        </button>
+        <div id="err" class="text-brand-terracotta text-xs text-center min-h-[1rem]"></div>
+      </form>
+
+      <div id="divider" class="hidden items-center gap-3 my-5 text-brand-muted text-[11px] uppercase tracking-wider">
+        <div class="flex-1 h-px bg-brand-border"></div>or<div class="flex-1 h-px bg-brand-border"></div>
+      </div>
+      <button id="auth0-btn" type="button"
+        class="hidden w-full py-2.5 rounded-lg bg-brand-navy2 border border-brand-border text-sm font-medium transition-all hover:border-brand-gold hover:text-brand-gold items-center justify-center gap-2">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 8.5v7L12 22l10-6.5v-7L12 2zm0 2.3l7.5 4.9v6.6L12 20.7l-7.5-4.9V9.2L12 4.3z"/></svg>
+        Sign in with Auth0
+      </button>
+    </div>
+    <div class="text-center text-[11px] text-brand-muted mt-6">Propose &rarr; review &rarr; run. Nothing executes without approval.</div>
+  </div>
+
+<script>
+(async () => {
+  try {
+    const res = await fetch('/api/auth/auth0/status');
+    const data = await res.json();
+    if (data.enabled) {
+      document.getElementById('divider').classList.remove('hidden');
+      document.getElementById('divider').classList.add('flex');
+      document.getElementById('auth0-btn').classList.remove('hidden');
+      document.getElementById('auth0-btn').classList.add('flex');
+    }
+  } catch (e) { /* password login still works */ }
+})();
+document.getElementById('auth0-btn').addEventListener('click', () => {
+  window.location.href = '/api/auth/auth0/start';
+});
+
+const params = new URLSearchParams(window.location.search);
+if (params.get('error')) {
+  document.getElementById('err').textContent = decodeURIComponent(params.get('error')).replace(/_/g, ' ');
+}
+
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const err = document.getElementById('err');
+  err.textContent = '';
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      err.textContent = data.detail || 'Login failed';
+      return;
+    }
+    window.location.href = '/';
+  } catch (e) {
+    err.textContent = String(e);
+  }
+});
+</script>
+</body>
+</html>

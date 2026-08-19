@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — Git</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="/assets/theme.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-brand-navy text-brand-ink font-sans antialiased">
+<div id="app-root"></div>
+
+<div id="page-content" class="flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+  <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
+    <h1 class="text-sm font-semibold">Git</h1>
+    <p class="text-xs text-brand-muted mt-0.5">Current status + recent history. Commit/push still goes through propose &amp; approve.</p>
+  </header>
+  <div id="content" class="flex-1 overflow-y-auto p-6"></div>
+</div>
+
+<script src="/assets/sidebar.js"></script>
+<script>
+let me = null;
+
+function skeleton() {
+  return `<div class="h-40 rounded-xl bg-brand-panel border border-brand-border animate-pulse max-w-2xl mb-6"></div>
+          <div class="h-64 rounded-xl bg-brand-panel border border-brand-border animate-pulse max-w-2xl"></div>`;
+}
+
+const STATUS_LABEL = { M: 'modified', A: 'added', D: 'deleted', '??': 'untracked', R: 'renamed' };
+
+async function load() {
+  const content = document.getElementById('content');
+  content.innerHTML = skeleton();
+
+  const [statusRes, logRes] = await Promise.all([fetch('/api/git/status'), fetch('/api/git/log')]);
+  if (statusRes.status === 403) {
+    content.innerHTML = `<div class="max-w-md mx-auto mt-16 text-center animate-fade-in-up">
+      <div class="text-sm text-brand-muted">Your role (${me.role}) can't view git status — needs git access.</div>
+    </div>`;
+    return;
+  }
+  const status = await statusRes.json();
+  const { commits } = await logRes.json();
+
+  const canCommit = canRun(me, 'git');
+  const trackedChanged = status.files.filter(f => f.status !== '??');
+
+  const fileRows = status.files.length
+    ? status.files.map((f, i) => {
+        const discardable = canCommit && f.status !== '??';
+        return `<div class="flex items-center gap-2 py-1.5 text-xs animate-fade-in group" style="animation-delay:${i*20}ms">
+          <span class="w-16 shrink-0 font-mono text-[10px] uppercase px-1.5 py-0.5 rounded ${f.status === 'M' ? 'bg-brand-gold/15 text-brand-gold' : f.status === '??' ? 'bg-brand-teal/15 text-brand-teal' : 'bg-brand-terracotta/15 text-brand-terracotta'}">${STATUS_LABEL[f.status] || f.status}</span>
+          <span class="font-mono text-brand-muted truncate flex-1">${f.path.replace(/</g,'&lt;')}</span>
+          ${discardable ? `<button data-discard="${f.path.replace(/"/g,'&quot;')}" class="hidden group-hover:inline text-[10px] font-medium text-brand-terracotta hover:underline shrink-0">Discard</button>` : ''}
+        </div>`;
+      }).join('')
+    : `<div class="text-xs text-brand-muted py-2">Working tree clean.</div>`;
+
+  const commitRows = commits.map((c, i) => `<div class="flex items-start gap-3 py-2.5 border-b border-brand-border/60 last:border-0 animate-fade-in" style="animation-delay:${Math.min(i*20,300)}ms">
+      <span class="font-mono text-[11px] text-brand-gold shrink-0 mt-0.5">${c.hash}</span>
+      <div class="min-w-0 flex-1">
+        <div class="text-sm truncate">${c.message.replace(/</g,'&lt;')}</div>
+        <div class="text-[11px] text-brand-muted mt-0.5">${c.author.replace(/</g,'&lt;')} · ${c.date}</div>
+      </div>
+    </div>`).join('') || `<div class="text-xs text-brand-muted py-2">No commits found.</div>`;
+
+  content.innerHTML = `
+    <div class="max-w-2xl space-y-6">
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-5 animate-fade-in-up">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold">Status</h2>
+          <div class="flex items-center gap-3">
+            ${canCommit && trackedChanged.length ? `<button id="discard-all-btn" class="text-[11px] font-medium text-brand-terracotta hover:underline">Discard all tracked changes</button>` : ''}
+            <span class="text-xs font-mono text-brand-muted">branch: ${status.branch || '—'}</span>
+          </div>
+        </div>
+        ${fileRows}
+        ${canCommit ? `
+        <div class="mt-4 pt-4 border-t border-brand-border">
+          <input id="commit-msg" type="text" placeholder="Commit message"
+            class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-2" />
+          <label class="flex items-center gap-2 text-xs text-brand-muted mb-3">
+            <input id="commit-push" type="checkbox" checked class="accent-brand-gold" /> also push
+          </label>
+          <button id="commit-btn" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-sm font-semibold transition-all hover:brightness-105 active:scale-[.98]">Commit</button>
+          <div id="commit-result" class="text-xs text-brand-muted mt-2"></div>
+        </div>` : ''}
+      </div>
+
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-5 animate-fade-in-up" style="animation-delay:80ms">
+        <h2 class="text-sm font-semibold mb-1">Recent commits</h2>
+        <div class="divide-y divide-brand-border/0">${commitRows}</div>
+      </div>
+    </div>`;
+
+  if (canCommit) {
+    document.getElementById('commit-btn').onclick = async () => {
+      const message = document.getElementById('commit-msg').value.trim();
+      const push = document.getElementById('commit-push').checked;
+      const result = document.getElementById('commit-result');
+      if (!message) { result.textContent = 'Enter a commit message.'; return; }
+      if (!(await dialogConfirm(`Commit all changes with message "${message}"${push ? ' and push to origin' : ''}?`, { confirmText: 'Commit' }))) return;
+      result.textContent = 'Committing…';
+      try {
+        const res = await fetch('/api/actions/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'git-' + Date.now(), type: 'git', payload: { message, push } }),
+        });
+        const data = await res.json();
+        result.textContent = res.ok ? 'Committed.' : (data.detail?.error || JSON.stringify(data.detail) || 'Failed.');
+        if (res.ok) load();
+      } catch (e) {
+        result.textContent = String(e);
+      }
+    };
+
+    document.querySelectorAll('[data-discard]').forEach(btn => {
+      btn.onclick = async () => {
+        const file = btn.dataset.discard;
+        if (!(await dialogConfirm(`Discard uncommitted changes to "${file}"? This cannot be undone.`, { confirmText: 'Discard', danger: true }))) return;
+        await runDiscard([file]);
+      };
+    });
+    const discardAllBtn = document.getElementById('discard-all-btn');
+    if (discardAllBtn) {
+      discardAllBtn.onclick = async () => {
+        if (!(await dialogConfirm(`Discard ALL ${trackedChanged.length} uncommitted tracked change(s)? This cannot be undone. Untracked new files are left alone.`, { confirmText: 'Discard all', danger: true }))) return;
+        await runDiscard(null);
+      };
+    }
+  }
+}
+
+async function runDiscard(files) {
+  try {
+    const res = await fetch('/api/actions/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'git-discard-' + Date.now(), type: 'git', payload: files ? { op: 'discard', files } : { op: 'discard' } }),
+    });
+    if (!res.ok) { const d = await res.json(); await dialogAlert(d.detail?.error || JSON.stringify(d.detail) || 'Discard failed'); return; }
+  } catch (e) {
+    await dialogAlert(String(e));
+  }
+  load();
+}
+
+(async () => {
+  me = await mountShell('/git');
+  if (!me) return;
+  load();
+})();
+</script>
+</body>
+</html>
