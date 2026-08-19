@@ -97,7 +97,7 @@ def run_docker(payload: dict[str, Any]) -> dict[str, Any]:
         raise ExecutionError(f"Unknown service(s) {invalid} for env '{env}'; allowed: {sorted(allowed)}")
 
     compose_args = [] if env == "dev" else _PROD_COMPOSE_ARGS
-    base = ["docker", "compose", *compose_args, "-p", "rewamped-site"]
+    base = ["docker", "compose", *compose_args, "-p", settings.compose_project]
 
     if op == "stop":
         result = _run_subprocess([*base, "stop", *services], cwd=settings.repo_path, timeout=120)
@@ -354,7 +354,7 @@ def run_publish(payload: dict[str, Any]) -> dict[str, Any]:
         return {"steps": steps, "ok": False}
 
     build = _run_subprocess(
-        ["docker", "compose", *_PROD_COMPOSE_ARGS, "-p", "rewamped-site", "build", *_PROD_COMPOSE_SERVICES],
+        ["docker", "compose", *_PROD_COMPOSE_ARGS, "-p", settings.compose_project, "build", *_PROD_COMPOSE_SERVICES],
         cwd=settings.repo_path,
         timeout=1800,
     )
@@ -363,7 +363,7 @@ def run_publish(payload: dict[str, Any]) -> dict[str, Any]:
         return {"steps": steps, "ok": False}
 
     up = _run_subprocess(
-        ["docker", "compose", *_PROD_COMPOSE_ARGS, "-p", "rewamped-site", "up", "-d", "--force-recreate", *_PROD_COMPOSE_SERVICES],
+        ["docker", "compose", *_PROD_COMPOSE_ARGS, "-p", settings.compose_project, "up", "-d", "--force-recreate", *_PROD_COMPOSE_SERVICES],
         cwd=settings.repo_path,
         timeout=300,
     )
@@ -396,7 +396,7 @@ def run_rollback(payload: dict[str, Any]) -> dict[str, Any]:
         return {"steps": steps, "ok": False}
 
     restart = _run_subprocess(
-        ["docker", "compose", *_PROD_COMPOSE_ARGS, "-p", "rewamped-site", "restart", "cms-prod"],
+        ["docker", "compose", *_PROD_COMPOSE_ARGS, "-p", settings.compose_project, "restart", "cms-prod"],
         cwd=settings.repo_path,
         timeout=120,
     )
@@ -526,7 +526,7 @@ def run_codegen_agent(payload: dict[str, Any]) -> dict[str, Any]:
     cmd = [
         "docker", "compose", "-f", f"{settings.repo_path}/docker-compose.yml",
         "--project-directory", settings.host_repo_path,
-        "-p", "rewamped-site", "run", "--rm",
+        "-p", settings.compose_project, "run", "--rm",
     ]
     if resume_id:
         cmd += ["-e", f"RESUME_ID={resume_id}"]

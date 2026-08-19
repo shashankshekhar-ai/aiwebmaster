@@ -41,7 +41,7 @@ def _fetch_cms_list(path: str, *, limit: int = 20) -> list[dict]:
 def _docker_ps() -> str:
     try:
         result = subprocess.run(
-            ["docker", "compose", "-p", "rewamped-site", "ps", "--format", "table {{.Name}}\\t{{.Status}}"],
+            ["docker", "compose", "-p", settings.compose_project, "ps", "--format", "table {{.Name}}\\t{{.Status}}"],
             cwd=settings.repo_path,
             capture_output=True,
             text=True,

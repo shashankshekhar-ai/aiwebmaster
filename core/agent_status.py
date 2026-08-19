@@ -33,7 +33,7 @@ def _check_one(service: str) -> dict[str, Any]:
             [
                 "docker", "compose", "-f", f"{settings.repo_path}/docker-compose.yml",
                 "--project-directory", settings.host_repo_path,
-                "-p", "rewamped-site", "run", "--rm", "--entrypoint", "sh", service,
+                "-p", settings.compose_project, "run", "--rm", "--entrypoint", "sh", service,
                 "-c", f"test -f {path} && echo LOGGED_IN || echo NOT_LOGGED_IN",
             ],
             cwd=settings.repo_path,

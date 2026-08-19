@@ -6,12 +6,13 @@ FROM python:3.13-slim
 # and the compose v2 plugin binaries are fetched directly from upstream releases.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git openssh-client ca-certificates curl postgresql-client \
-    && curl -fsSL -o /tmp/docker.tgz https://download.docker.com/linux/static/stable/x86_64/docker-27.3.1.tgz \
+    && ARCH="$(uname -m)" \
+    && curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${ARCH}/docker-27.3.1.tgz" \
     && tar -xzf /tmp/docker.tgz -C /usr/local/bin --strip-components=1 docker/docker \
     && rm /tmp/docker.tgz \
     && mkdir -p /usr/libexec/docker/cli-plugins \
     && curl -fsSL -o /usr/libexec/docker/cli-plugins/docker-compose \
-       https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
+       "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-${ARCH}" \
     && chmod +x /usr/libexec/docker/cli-plugins/docker-compose \
     && rm -rf /var/lib/apt/lists/* \
     # /repo is a bind mount owned by the host user; this container runs as

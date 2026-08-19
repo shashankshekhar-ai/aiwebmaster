@@ -57,7 +57,7 @@ async def run_agent_turn_stream(session: dict[str, Any], prompt: str) -> AsyncIt
     cmd = [
         "docker", "compose", "-f", f"{settings.repo_path}/docker-compose.yml",
         "--project-directory", settings.host_repo_path,
-        "-p", "rewamped-site", "run", "--rm",
+        "-p", settings.compose_project, "run", "--rm",
         "-e", f"RESUME_ID={resume_id}",
         service, prompt,
     ]

@@ -50,6 +50,17 @@ class Settings(BaseSettings):
     # volumes involved) don't need this — the CLI reads build context itself.
     host_repo_path: str = "/repo"
 
+    # docker compose project name for the main stack (web/api/cms/postgres/
+    # aiwebmaster) — every docker/publish/rollback/codegen_agent/Agent
+    # Terminal executor passes this as `-p`. Compose derives a project name
+    # from the directory name (`rewamped-site`) by default, but if the stack
+    # was ever brought up with an explicit `-p <other-name>` (e.g. `-p tbz`),
+    # that's the real name docker knows it by from then on — a mismatch here
+    # doesn't error, it just silently targets a nonexistent/empty project,
+    # confirmed by testing. Override via .env if this host's real project
+    # name differs from the directory-derived default.
+    compose_project: str = "rewamped-site"
+
     # CMS base URL this service calls for content/nav actions.
     cms_url: str = "http://cms:3003"
     cms_service_token: str = ""
