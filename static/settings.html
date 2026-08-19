@@ -22,6 +22,72 @@
 <script src="/assets/sidebar.js"></script>
 <script>
 const PROVIDER_LABELS = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI (Codex / GPT)', gemini: 'Google (Gemini)' };
+const PROVIDER_DESC = {
+  anthropic: 'Best at following instructions and remembering earlier context in a conversation. Slightly more expensive per message.',
+  gemini: 'Fast and low-cost. Good for straightforward requests; can occasionally lose track of context in a long back-and-forth.',
+  openai: 'General-purpose, similar cost to Gemini.',
+};
+const PROVIDER_KEY_HELP = {
+  anthropic: 'Get a key at console.anthropic.com — look for "API Keys" in the left menu.',
+  gemini: 'Get a key at aistudio.google.com/apikey.',
+  openai: 'Get a key at platform.openai.com/api-keys.',
+};
+
+function fmtNum(n) { return (n || 0).toLocaleString(); }
+
+function usageRow(label, stats) {
+  if (!stats) return `<div class="flex justify-between text-xs text-brand-muted"><span>${label}</span><span>—</span></div>`;
+  return `<div class="flex justify-between text-xs">
+    <span class="text-brand-muted">${label}</span>
+    <span class="font-mono">${fmtNum(stats.calls)} calls · ${fmtNum(stats.input_tokens)} in / ${fmtNum(stats.output_tokens)} out</span>
+  </div>`;
+}
+
+async function loadUsageCard() {
+  const el = document.getElementById('usage-card-body');
+  try {
+    const r = await fetch('/api/settings/usage');
+    const d = await r.json();
+    const providers = new Set([...Object.keys(d.today || {}), ...Object.keys(d.all_time || {})]);
+    if (providers.size === 0) {
+      el.innerHTML = `<div class="text-xs text-brand-muted">No usage recorded yet — numbers show up after the first chat reply.</div>`;
+      return;
+    }
+    el.innerHTML = [...providers].map(p => `
+      <div class="mb-3 last:mb-0">
+        <div class="text-xs font-medium text-brand-ink mb-1">${PROVIDER_LABELS[p] || p}</div>
+        ${usageRow('Today', d.today?.[p])}
+        ${usageRow('All time', d.all_time?.[p])}
+      </div>`).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="text-xs text-brand-muted">Could not load usage: ${String(e)}</div>`;
+  }
+}
+
+async function loadSandboxCard() {
+  const el = document.getElementById('sandbox-card-body');
+  const btn = document.getElementById('sandbox-refresh');
+  el.innerHTML = `<div class="text-xs text-brand-muted">Checking…</div>`;
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/settings/agents');
+    const d = await r.json();
+    const labels = { 'claude-agent': 'Claude Code sandbox', 'codex-agent': 'Codex sandbox' };
+    el.innerHTML = d.sandboxes.map(s => {
+      const dot = s.logged_in === true ? 'bg-green-500' : s.logged_in === false ? 'bg-red-500' : 'bg-yellow-500';
+      const text = s.logged_in === true ? 'Logged in' : s.logged_in === false ? 'Not logged in' : `Unknown (${s.error || 'check failed'})`;
+      return `<div class="flex items-center gap-2 text-xs mb-1.5 last:mb-0">
+        <span class="w-2 h-2 rounded-full ${dot} shrink-0"></span>
+        <span class="text-brand-ink">${labels[s.service] || s.service}</span>
+        <span class="text-brand-muted">— ${text}</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="text-xs text-brand-muted">Could not check sandbox status: ${String(e)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 async function load() {
   const me = await mountShell('/settings');
@@ -46,29 +112,76 @@ async function load() {
   const options = data.providers.map(p => `<option value="${p}">${PROVIDER_LABELS[p] || p}</option>`).join('');
 
   content.innerHTML = `
-    <div class="max-w-lg bg-brand-panel border border-brand-border rounded-xl p-6 animate-fade-in-up">
-      <div class="text-xs text-brand-muted mb-6 leading-relaxed">${current}</div>
+    <div class="grid gap-6 max-w-lg">
 
-      <label class="block text-xs font-medium text-brand-muted mb-1.5">Provider</label>
-      <select id="f-provider" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-4">${options}</select>
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-6 animate-fade-in-up">
+        <div class="text-sm font-semibold text-brand-ink mb-1">Which AI answers your chats?</div>
+        <div class="text-xs text-brand-muted mb-6 leading-relaxed">${current}</div>
 
-      <label class="block text-xs font-medium text-brand-muted mb-1.5">API key</label>
-      <div class="flex gap-2 mb-4">
-        <input id="f-key" type="password" placeholder="sk-… / AIza… / etc"
-          class="flex-1 px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all" />
-        <button id="f-fetch" class="px-3.5 py-2 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold whitespace-nowrap">Fetch models</button>
+        <label class="block text-xs font-medium text-brand-muted mb-1.5">AI provider</label>
+        <select id="f-provider" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-1.5">${options}</select>
+        <div id="f-provider-desc" class="text-[11px] text-brand-muted mb-4 leading-relaxed"></div>
+
+        <label class="block text-xs font-medium text-brand-muted mb-1.5">API key</label>
+        <input id="f-key" type="password" autocomplete="off" placeholder="Paste your key here"
+          class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-1.5" />
+        <div id="f-key-help" class="text-[11px] text-brand-muted mb-5 leading-relaxed"></div>
+
+        <button id="f-save" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-sm font-semibold transition-all hover:brightness-105 active:scale-[.98]">Save</button>
+        <div id="result" class="text-xs text-brand-muted mt-3"></div>
+
+        <details class="mt-5 pt-4 border-t border-brand-border">
+          <summary class="text-[11px] text-brand-muted cursor-pointer hover:text-brand-ink">Advanced — pick a specific model</summary>
+          <div class="mt-3">
+            <label class="block text-xs font-medium text-brand-muted mb-1.5">Model</label>
+            <div class="flex gap-2 mb-2">
+              <select id="f-model" class="flex-1 px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all">
+                <option value="">Fetch models first, or type below</option>
+              </select>
+              <button id="f-fetch" class="px-3.5 py-2 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold whitespace-nowrap">Fetch models</button>
+            </div>
+            <input id="f-model-manual" type="text" autocomplete="off" placeholder="or type a model name manually"
+              class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all" />
+            <div class="text-[11px] text-brand-muted mt-1.5">Left alone, a sensible default model is used automatically — you don't need to touch this.</div>
+          </div>
+        </details>
       </div>
 
-      <label class="block text-xs font-medium text-brand-muted mb-1.5">Model</label>
-      <select id="f-model" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-2">
-        <option value="">Fetch models first, or type below</option>
-      </select>
-      <input id="f-model-manual" type="text" placeholder="or type a model name manually"
-        class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-5" />
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-6 animate-fade-in-up">
+        <div class="text-xs font-semibold text-brand-ink mb-4">Chat AI usage</div>
+        <div id="usage-card-body"><div class="text-xs text-brand-muted">Loading…</div></div>
+      </div>
 
-      <button id="f-save" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-sm font-semibold transition-all hover:brightness-105 active:scale-[.98]">Save</button>
-      <div id="result" class="text-xs text-brand-muted mt-3"></div>
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-6 animate-fade-in-up">
+        <div class="flex items-center justify-between mb-4">
+          <div class="text-xs font-semibold text-brand-ink">Codegen agent sandboxes</div>
+          <button id="sandbox-refresh" class="px-2.5 py-1 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold">Check</button>
+        </div>
+        <div id="sandbox-card-body"><div class="text-xs text-brand-muted">Click Check — each check spins the sandbox container, so it's not run automatically.</div></div>
+      </div>
+
     </div>`;
+
+  loadUsageCard();
+  document.getElementById('sandbox-refresh').onclick = loadSandboxCard;
+
+  const providerSel = document.getElementById('f-provider');
+  const descEl = document.getElementById('f-provider-desc');
+  const keyHelpEl = document.getElementById('f-key-help');
+  const modelManual = document.getElementById('f-model-manual');
+  function syncProviderHelp() {
+    const p = providerSel.value;
+    descEl.textContent = PROVIDER_DESC[p] || '';
+    keyHelpEl.textContent = PROVIDER_KEY_HELP[p] || '';
+    // Pre-fill a sane default model so Save works even if the user never
+    // opens "Advanced" — only overwrite if they haven't typed one themselves.
+    if (!modelManual.dataset.userEdited) modelManual.value = data.default_models[p] || '';
+  }
+  providerSel.value = data.configured ? data.provider : providerSel.value;
+  modelManual.value = data.configured ? data.model : (data.default_models[providerSel.value] || '');
+  syncProviderHelp();
+  providerSel.onchange = syncProviderHelp;
+  modelManual.addEventListener('input', () => { modelManual.dataset.userEdited = '1'; });
 
   document.getElementById('f-fetch').onclick = async () => {
     const provider = document.getElementById('f-provider').value;
@@ -93,7 +206,8 @@ async function load() {
     const apiKey = document.getElementById('f-key').value;
     const model = document.getElementById('f-model-manual').value || document.getElementById('f-model').value;
     const result = document.getElementById('result');
-    if (!apiKey || !model) { result.textContent = 'API key and model are required.'; return; }
+    if (!apiKey) { result.textContent = 'Paste an API key first.'; return; }
+    if (!model) { result.textContent = 'No model set — open "Advanced" and type one.'; return; }
     result.textContent = 'Saving…';
     try {
       const r = await fetch('/api/settings/ai', {

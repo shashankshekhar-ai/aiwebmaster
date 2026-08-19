@@ -40,8 +40,23 @@ function icon(d, extra) {
 async function api(path) {
   const res = await fetch('/api' + path);
   if (res.status === 401) { window.location.href = '/login'; throw new Error('unauth'); }
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.status);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const raw = body.detail?.error || body.detail || `Server error (${res.status})`;
+    throw new Error(typeof raw === 'string' ? raw : JSON.stringify(raw));
+  }
   return res.json();
+}
+
+function errorState(message, retryFn) {
+  return `<div class="max-w-md mx-auto mt-16 text-center animate-fade-in-up">
+    <div class="w-12 h-12 rounded-full bg-brand-terracotta/15 flex items-center justify-center mx-auto mb-4">
+      <svg class="w-6 h-6 text-brand-terracotta" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    </div>
+    <div class="text-sm text-brand-ink font-medium mb-1.5">Couldn't load this</div>
+    <div class="text-xs text-brand-muted mb-5">${String(message).replace(/</g,'&lt;').slice(0, 300)}</div>
+    <button onclick="${retryFn}" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-xs font-semibold transition-all hover:brightness-105">Try again</button>
+  </div>`;
 }
 
 function renderCrumbs() {
@@ -61,15 +76,19 @@ async function goApps() {
   state = { level: 'apps', kind: null };
   renderCrumbs();
   view.innerHTML = skeletonGrid();
-  const data = await api('/apps');
-  view.innerHTML = `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${data.kinds.map((k, i) =>
-    `<div onclick="goList('${k.kind}')"
-      class="group cursor-pointer bg-brand-panel border border-brand-border rounded-xl p-5 transition-all hover:border-brand-gold hover:-translate-y-0.5 hover:shadow-lg animate-fade-in-up"
-      style="animation-delay:${i*40}ms">
-      <div class="w-10 h-10 rounded-lg bg-brand-panel2 border border-brand-border flex items-center justify-center text-brand-gold mb-3 group-hover:scale-110 transition-transform">${icon(ICON[k.kind] || ICON.pages)}</div>
-      <div class="font-semibold text-sm">${k.label}</div>
-    </div>`
-  ).join('')}</div>`;
+  try {
+    const data = await api('/apps');
+    view.innerHTML = `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">${data.kinds.map((k, i) =>
+      `<div onclick="goList('${k.kind}')"
+        class="group cursor-pointer bg-brand-panel border border-brand-border rounded-xl p-5 transition-all hover:border-brand-gold hover:-translate-y-0.5 hover:shadow-lg animate-fade-in-up"
+        style="animation-delay:${i*40}ms">
+        <div class="w-10 h-10 rounded-lg bg-brand-panel2 border border-brand-border flex items-center justify-center text-brand-gold mb-3 group-hover:scale-110 transition-transform">${icon(ICON[k.kind] || ICON.pages)}</div>
+        <div class="font-semibold text-sm">${k.label}</div>
+      </div>`
+    ).join('')}</div>`;
+  } catch (e) {
+    view.innerHTML = errorState(e.message, 'goApps()');
+  }
 }
 
 function openInChat(kind, docId) {
@@ -81,29 +100,34 @@ async function goList(kind) {
   renderCrumbs();
   view.innerHTML = skeletonGrid();
 
-  const data = await api(`/content/${kind}`);
-  const docs = data.docs || [];
-  if (kind === 'navigation') docs.sort((a, b) => (a.location || '').localeCompare(b.location || '') || (a.order || 0) - (b.order || 0));
+  try {
+    const data = await api(`/content/${kind}`);
+    const docs = data.docs || [];
+    if (kind === 'navigation') docs.sort((a, b) => (a.location || '').localeCompare(b.location || '') || (a.order || 0) - (b.order || 0));
 
-  view.innerHTML = `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
-    <div onclick="openInChat('${kind}', 'new')"
-      class="cursor-pointer border-2 border-dashed border-brand-border rounded-xl p-5 flex items-center justify-center text-brand-gold text-sm font-medium transition-all hover:border-brand-gold hover:bg-brand-panel/50 animate-fade-in-up">
-      ＋ New ${kind}
-    </div>
-    ${docs.map((d, i) => `<div id="card-${kind}-${d.id}"
-      class="group relative bg-brand-panel border border-brand-border rounded-xl p-5 transition-all hover:border-brand-gold hover:-translate-y-0.5 hover:shadow-lg animate-fade-in-up"
-      style="animation-delay:${(i+1)*30}ms">
-      ${kind === 'navigation' ? `<button onclick="event.stopPropagation(); removeNavLink('${(d.label||'').replace(/'/g,"\\'")}', '${d.location}', 'card-${kind}-${d.id}')"
-        class="absolute top-2 right-2 hidden group-hover:flex w-6 h-6 items-center justify-center rounded-md bg-brand-navy2 border border-brand-border text-brand-muted hover:text-brand-terracotta hover:border-brand-terracotta transition-all" title="Remove">
-        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>` : ''}
-      <div onclick="openInChat('${kind}', '${d.id}')" class="cursor-pointer">
-        <div class="font-semibold text-sm truncate group-hover:text-brand-gold transition-colors pr-6">${(d.title || d.label || 'Untitled').replace(/</g, '&lt;')}</div>
-        <div class="text-xs text-brand-muted mt-1 truncate font-mono">${(d.slug || d.href || '').replace(/</g, '&lt;')}</div>
-        ${kind === 'navigation' ? `<div class="text-[10px] text-brand-muted mt-2 uppercase tracking-wider">${d.location} · order ${d.order ?? 0}</div>` : ''}
+    view.innerHTML = `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+      <div onclick="openInChat('${kind}', 'new')"
+        class="cursor-pointer border-2 border-dashed border-brand-border rounded-xl p-5 flex items-center justify-center text-brand-gold text-sm font-medium transition-all hover:border-brand-gold hover:bg-brand-panel/50 animate-fade-in-up">
+        ＋ New ${kind}
       </div>
-    </div>`).join('')}
-  </div>`;
+      ${docs.map((d, i) => `<div id="card-${kind}-${d.id}"
+        class="group relative bg-brand-panel border border-brand-border rounded-xl p-5 transition-all hover:border-brand-gold hover:-translate-y-0.5 hover:shadow-lg animate-fade-in-up"
+        style="animation-delay:${(i+1)*30}ms">
+        ${kind === 'navigation' ? `<button onclick="event.stopPropagation(); removeNavLink('${(d.label||'').replace(/'/g,"\\'")}', '${d.location}', 'card-${kind}-${d.id}')"
+          class="absolute top-2 right-2 hidden group-hover:flex w-6 h-6 items-center justify-center rounded-md bg-brand-navy2 border border-brand-border text-brand-muted hover:text-brand-terracotta hover:border-brand-terracotta transition-all" title="Remove">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>` : ''}
+        <div onclick="openInChat('${kind}', '${d.id}')" class="cursor-pointer">
+          <div class="font-semibold text-sm truncate group-hover:text-brand-gold transition-colors pr-6">${(d.title || d.label || 'Untitled').replace(/</g, '&lt;')}</div>
+          <div class="text-xs text-brand-muted mt-1 truncate font-mono">${(d.slug || d.href || '').replace(/</g, '&lt;')}</div>
+          ${kind === 'navigation' ? `<div class="text-[10px] text-brand-muted mt-2 uppercase tracking-wider">${d.location} · order ${d.order ?? 0}</div>` : ''}
+        </div>
+      </div>`).join('')}
+      ${docs.length === 0 ? `<div class="col-span-full text-xs text-brand-muted py-6 text-center">Nothing here yet — click "+ New ${kind}" to create the first one.</div>` : ''}
+    </div>`;
+  } catch (e) {
+    view.innerHTML = errorState(e.message, `goList('${kind}')`);
+  }
 }
 
 async function removeNavLink(label, location, cardId) {

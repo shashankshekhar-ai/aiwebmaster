@@ -14,6 +14,15 @@ from typing import Any
 
 from core.ai_settings import get_active_ai_settings
 from core.config import settings
+from db.ai_usage import log_usage
+
+
+def _log_usage_safe(*, provider: str, model: str, input_tokens: int, output_tokens: int) -> None:
+    # Usage logging is best-effort telemetry, never allowed to break a chat reply.
+    try:
+        log_usage(provider=provider, model=model, input_tokens=input_tokens, output_tokens=output_tokens)
+    except Exception:
+        pass
 
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-5",
@@ -132,6 +141,13 @@ def _call_anthropic(
     except anthropic.APIError as exc:
         raise AIProviderError(f"Anthropic API call failed: {exc}") from exc
 
+    _log_usage_safe(
+        provider="anthropic",
+        model=cfg["model"] or DEFAULT_MODELS["anthropic"],
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+    )
+
     reply = ""
     proposal = None
     for block in response.content:
@@ -173,6 +189,14 @@ def _call_openai(
         )
     except openai.APIError as exc:
         raise AIProviderError(f"OpenAI API call failed: {exc}") from exc
+
+    if response.usage:
+        _log_usage_safe(
+            provider="openai",
+            model=cfg["model"] or DEFAULT_MODELS["openai"],
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+        )
 
     message = response.choices[0].message
     reply = message.content or ""
@@ -229,6 +253,14 @@ def _call_gemini(
         )
     except Exception as exc:
         raise AIProviderError(f"Gemini API call failed: {exc}") from exc
+
+    if response.usage_metadata:
+        _log_usage_safe(
+            provider="gemini",
+            model=cfg["model"] or DEFAULT_MODELS["gemini"],
+            input_tokens=response.usage_metadata.prompt_token_count or 0,
+            output_tokens=response.usage_metadata.candidates_token_count or 0,
+        )
 
     if not response.text:
         raise AIProviderError("Gemini model returned no content")

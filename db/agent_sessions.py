@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS aiwebmaster_agent_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_agent_events_session ON aiwebmaster_agent_events(session_id, id);
+-- Links one agent_session to a chat session, so chat's `codegen_agent`
+-- action can resume the same Claude Code conversation across multiple
+-- proposals in the same chat thread, the way Agent Terminal already does
+-- within its own page — one continuing thread per chat session, not a
+-- fresh one-shot invocation every time. Nullable: Agent Terminal's own
+-- sessions never set this.
+ALTER TABLE aiwebmaster_agent_sessions ADD COLUMN IF NOT EXISTS chat_session_id INTEGER REFERENCES aiwebmaster_chat_sessions(id) ON DELETE CASCADE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_chat_session ON aiwebmaster_agent_sessions(chat_session_id) WHERE chat_session_id IS NOT NULL;
 """
 
 
@@ -143,6 +151,32 @@ def set_cli_session_id(session_id: int, cli_session_id: str) -> None:
                 (cli_session_id, session_id),
             )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_or_create_for_chat(chat_session_id: int, user_id: int) -> dict[str, Any]:
+    """The one continuing codegen thread for a given chat session — created
+    on first use, reused (with its cli_session_id, if any) on every
+    subsequent codegen_agent action proposed in that same chat."""
+    conn = psycopg2.connect(settings.api_database_url)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id, tool, cli_session_id FROM aiwebmaster_agent_sessions WHERE chat_session_id = %s",
+                (chat_session_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+            cur.execute(
+                "INSERT INTO aiwebmaster_agent_sessions (user_id, chat_session_id, title) "
+                "VALUES (%s, %s, 'Chat codegen thread') RETURNING id, tool, cli_session_id",
+                (user_id, chat_session_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return dict(row)
     finally:
         conn.close()
 

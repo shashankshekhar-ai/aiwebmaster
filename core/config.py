@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     # CMS base URL this service calls for content/nav actions.
     cms_url: str = "http://cms:3003"
     cms_service_token: str = ""
+    # Dev web frontend — used only for post-nav_link live-render verification
+    # (core/executors.py::call_nav_endpoint). Writing a nav row to the CMS
+    # doesn't guarantee any component actually renders it (confirmed the hard
+    # way: Footer.tsx silently ignored the whole navigation collection for
+    # months) — this closes that gap by fetching the real page after a write
+    # and checking the label actually appears, instead of reporting DB-write
+    # success as if it were "the site changed."
+    web_url: str = "http://web:3002"
 
     # Append-only audit trail (dual-written alongside the DB table) and
     # publish backups — both on a mounted volume so they survive redeploys.

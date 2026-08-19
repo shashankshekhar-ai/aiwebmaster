@@ -5,6 +5,7 @@ only ever called after a human clicks Run on a specific proposed action
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -176,6 +177,32 @@ def _cms_headers() -> dict[str, str]:
     return {"x-service-token": settings.cms_service_token, "content-type": "application/json"}
 
 
+_CONTENT_KIND_PATH = {
+    "page": "/{slug}",
+    "post": "/insights/{slug}",
+    "resource": "/resources/{slug}",
+    "case-study": "/resources/{slug}",
+}
+
+
+def _verify_content_live(kind: str, slug: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Same rationale as _verify_nav_link_live — a successful CMS write is
+    not the same claim as "the site shows it." Fetches the actual public
+    page for this doc and checks the title (the one field guaranteed present
+    across all four content kinds) appears in the HTML."""
+    title = fields.get("title") or fields.get("label")
+    if not title or not slug:
+        return {"checked": False, "reason": "no title/slug to check for"}
+    path = _CONTENT_KIND_PATH.get(kind, "/{slug}").format(slug=slug)
+    try:
+        resp = httpx.get(f"{settings.web_url}{path}", timeout=15)
+        if resp.status_code >= 400:
+            return {"checked": False, "reason": f"{path} returned {resp.status_code}"}
+        return {"checked": True, "visible": title in resp.text, "path": path}
+    except Exception as exc:
+        return {"checked": False, "reason": str(exc)[:200]}
+
+
 def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
     kind = payload.get("kind")
     doc_id = payload.get("docId")
@@ -197,7 +224,36 @@ def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
     resp = httpx.post(url, json=body, headers=_cms_headers(), timeout=30)
     if resp.status_code >= 400:
         raise ExecutionError(f"CMS content apply failed ({resp.status_code}): {resp.text[:500]}")
-    return resp.json()
+    result = resp.json()
+    if result.get("draft"):
+        # Saved as a draft on purpose — it's *correct* that it won't show live yet.
+        result["live_check"] = {"checked": False, "reason": "saved as draft, not published"}
+    else:
+        result["live_check"] = _verify_content_live(kind, result.get("slug", ""), fields)
+    return result
+
+
+def _verify_nav_link_live(payload: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort check that a nav_link write actually shows up on the live
+    dev homepage — a DB write succeeding is not the same claim as "the site
+    changed" (confirmed for real: Footer.tsx ignored the whole navigation
+    collection for months, so every nav_link write to location=footer
+    silently did nothing, while still reporting success). Fetches the
+    homepage HTML and checks for the label as plain text. Not authoritative
+    (a page that legitimately filters/groups links could false-negative) —
+    reported as a hint, not a hard failure, so a write is never rolled back
+    or hidden over this check alone."""
+    label = payload.get("label", "")
+    removed = bool(payload.get("remove"))
+    try:
+        resp = httpx.get(settings.web_url, timeout=15)
+        if resp.status_code >= 400:
+            return {"checked": False, "reason": f"homepage returned {resp.status_code}"}
+        present = label in resp.text
+        visible = (not present) if removed else present
+        return {"checked": True, "visible": visible}
+    except Exception as exc:
+        return {"checked": False, "reason": str(exc)[:200]}
 
 
 def call_nav_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
@@ -209,7 +265,9 @@ def call_nav_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
     resp = httpx.post(url, json=payload, headers=_cms_headers(), timeout=30)
     if resp.status_code >= 400:
         raise ExecutionError(f"Nav link upsert failed ({resp.status_code}): {resp.text[:500]}")
-    return resp.json()
+    result = resp.json()
+    result["live_check"] = _verify_nav_link_live(payload)
+    return result
 
 
 def run_user_management(payload: dict[str, Any]) -> dict[str, Any]:
@@ -406,6 +464,25 @@ def run_code_edit(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 _CODEGEN_SANDBOXES = {"claude": "claude-agent", "codex": "codex-agent"}
+# Field holding the CLI's own session id, keyed by tool — mirrors
+# core/agent_stream.py's _SESSION_ID_FIELDS (kept as a separate copy here
+# rather than a shared import, to avoid a circular import between the two
+# modules over one three-line constant+function).
+_SESSION_ID_FIELDS = {"claude": "session_id", "codex": "thread_id"}
+
+
+def _extract_cli_session_id(tool: str, output: str) -> str | None:
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get(_SESSION_ID_FIELDS[tool]):
+            return event[_SESSION_ID_FIELDS[tool]]
+    return None
 
 
 def run_codegen_agent(payload: dict[str, Any]) -> dict[str, Any]:
@@ -414,26 +491,53 @@ def run_codegen_agent(payload: dict[str, Any]) -> dict[str, Any]:
     full file-edit/bash tool access, unlike code_edit's mechanical
     old_string/new_string replace. The sandbox bind-mounts the same dev
     source directories this container's own /repo mount sees, so after it
-    exits we diff the working tree here to surface what changed."""
+    exits we diff the working tree here to surface what changed.
+
+    When called from chat (payload carries _chat_session_id/_user_id, set
+    by routers/actions.py from the chat request's session), this resumes
+    the same Claude Code conversation across multiple codegen_agent
+    proposals in one chat thread — the same $RESUME_ID mechanism Agent
+    Terminal uses, via db/agent_sessions.py::get_or_create_for_chat. A
+    codegen_agent action run outside chat (no session context) still works,
+    just always starts a fresh conversation."""
     from core.codegen_router import route_codegen
 
     prompt = payload.get("prompt")
     if not prompt or not isinstance(prompt, str):
         raise ExecutionError("codegen_agent requires a non-empty 'prompt'")
 
+    chat_session_id = payload.get("_chat_session_id")
+    user_id = payload.get("_user_id")
+    thread = None
+    if chat_session_id and user_id:
+        from db.agent_sessions import get_or_create_for_chat, set_cli_session_id, set_session_tool
+        thread = get_or_create_for_chat(chat_session_id, user_id)
+
     hint_tool = payload.get("tool")
-    tool = route_codegen(prompt, hint_tool if hint_tool in _CODEGEN_SANDBOXES else None)
+    if thread and thread.get("tool"):
+        tool = thread["tool"]
+    else:
+        tool = route_codegen(prompt, hint_tool if hint_tool in _CODEGEN_SANDBOXES else None)
+        if thread:
+            set_session_tool(thread["id"], tool)
     service = _CODEGEN_SANDBOXES[tool]
 
-    run = _run_subprocess(
-        [
-            "docker", "compose", "-f", f"{settings.repo_path}/docker-compose.yml",
-            "--project-directory", settings.host_repo_path,
-            "-p", "rewamped-site", "run", "--rm", service, prompt,
-        ],
-        cwd=settings.repo_path,
-        timeout=1800,
-    )
+    resume_id = (thread or {}).get("cli_session_id") or ""
+    cmd = [
+        "docker", "compose", "-f", f"{settings.repo_path}/docker-compose.yml",
+        "--project-directory", settings.host_repo_path,
+        "-p", "rewamped-site", "run", "--rm",
+    ]
+    if resume_id:
+        cmd += ["-e", f"RESUME_ID={resume_id}"]
+    cmd += [service, prompt]
+
+    run = _run_subprocess(cmd, cwd=settings.repo_path, timeout=1800)
+
+    if thread and run["ok"]:
+        new_session_id = _extract_cli_session_id(tool, run["stdout"])
+        if new_session_id and new_session_id != resume_id:
+            set_cli_session_id(thread["id"], new_session_id)
 
     diff_stat = _run_subprocess(["git", "diff", "--stat"], cwd=settings.repo_path, timeout=30)
     diff = _run_subprocess(["git", "diff"], cwd=settings.repo_path, timeout=30)
@@ -441,6 +545,7 @@ def run_codegen_agent(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": run["ok"],
         "tool": tool,
+        "resumed": bool(resume_id),
         "sandbox_output": run["stdout"],
         "sandbox_stderr": run["stderr"],
         "diff_stat": diff_stat["stdout"],

@@ -15,7 +15,17 @@ router = APIRouter(dependencies=[Depends(require_session)])
 def run_action(body: dict, request: Request) -> dict:
     action_id = body.get("id")
     action_type = body.get("type")
-    payload = body.get("payload") or {}
+    payload = dict(body.get("payload") or {})
+
+    # Only meaningful to run_codegen_agent (see core/executors.py) — lets a
+    # chat-proposed codegen_agent action resume the same Claude Code
+    # conversation across multiple proposals in one chat thread instead of
+    # starting fresh every time. Harmless no-op for every other action type
+    # (they don't read these keys).
+    chat_session_id = body.get("session_id")
+    if action_type == "codegen_agent" and chat_session_id:
+        payload["_chat_session_id"] = chat_session_id
+        payload["_user_id"] = request.state.user["id"]
 
     if not action_id or not action_type:
         raise HTTPException(status_code=400, detail="id and type are required")

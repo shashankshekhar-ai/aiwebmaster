@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth.deps import require_session
 from auth.permissions import PermissionDenied, require_permission
+from core.agent_status import sandbox_status
 from core.ai_provider import AIProviderError, DEFAULT_MODELS, list_models
 from core.ai_settings import PROVIDERS, get_active_ai_settings, save_ai_settings
+from db.ai_usage import usage_summary
 
 router = APIRouter(dependencies=[Depends(require_session)])
 
@@ -56,3 +58,18 @@ def fetch_models(provider: str, api_key: str, request: Request) -> dict:
         return {"models": list_models(provider, api_key)}
     except AIProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/settings/usage")
+def get_usage(request: Request) -> dict:
+    _require_settings_admin(request)
+    return usage_summary()
+
+
+@router.get("/settings/agents")
+def get_agent_status(request: Request) -> dict:
+    # Live docker-compose check, one subprocess per sandbox — not free
+    # (~seconds), so this is only called on demand from the Settings page,
+    # never on every page load.
+    _require_settings_admin(request)
+    return {"sandboxes": sandbox_status()}

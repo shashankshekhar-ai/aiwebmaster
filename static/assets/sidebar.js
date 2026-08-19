@@ -31,11 +31,12 @@ function renderShell(activePath) {
   const navHtml = NAV_ITEMS.map((item, i) => {
     const active = item.path === activePath;
     return `<a href="${item.path}" data-nav-item="${item.path}"
-      class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 animate-fade-in-left
+      class="group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 animate-fade-in-left
              ${active
                ? 'bg-brand-panel2 text-brand-ink border border-brand-border shadow-panel'
                : 'text-brand-muted hover:text-brand-ink hover:bg-brand-panel/70 border border-transparent'}"
       style="animation-delay:${i * 40}ms">
+      ${active ? '<span class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-brand-gold"></span>' : ''}
       <span class="${active ? 'text-brand-gold' : 'text-brand-muted group-hover:text-brand-gold'} transition-colors">${svgIcon(item.icon)}</span>
       <span class="flex-1">${item.label}</span>
       ${item.path === '/git' ? '<span id="nav-git-badge" class="hidden text-[10px] font-bold bg-brand-terracotta text-white rounded-full w-4 h-4 items-center justify-center"></span>' : ''}
@@ -128,14 +129,20 @@ function _showDialog({ message, input, inputValue, confirmText, cancelText, dang
     const root = _dialogRoot();
     const isPrompt = !!input;
     const isAlert = cancelText === null;
+    const iconWrap = danger
+      ? '<div class="w-11 h-11 rounded-full bg-brand-terracotta/15 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-brand-terracotta" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>'
+      : '<div class="w-11 h-11 rounded-full bg-brand-gold/15 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-brand-gold" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>';
     root.innerHTML = `
-      <div id="dlg-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in">
-        <div class="w-[360px] bg-brand-panel border border-brand-border rounded-2xl p-5 shadow-2xl animate-pop-in">
-          <div class="text-sm text-brand-ink mb-4">${message || ''}</div>
-          ${isPrompt ? `<input id="dlg-input" type="text" value="${(inputValue || '').replace(/"/g, '&quot;')}" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-4" />` : ''}
-          <div class="flex justify-end gap-2">
-            ${!isAlert ? `<button id="dlg-cancel" class="px-3.5 py-1.5 rounded-lg text-xs font-medium text-brand-muted hover:text-brand-ink transition-colors">${cancelText || 'Cancel'}</button>` : ''}
-            <button id="dlg-ok" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${danger ? 'bg-brand-terracotta text-white hover:brightness-110' : 'bg-brand-gold text-brand-navy hover:brightness-105'}">${confirmText || 'OK'}</button>
+      <div id="dlg-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4">
+        <div class="w-full max-w-sm bg-brand-panel border border-brand-border rounded-2xl p-6 shadow-2xl animate-pop-in">
+          <div class="flex items-start gap-3.5 mb-5">
+            ${iconWrap}
+            <div class="text-sm text-brand-ink leading-relaxed pt-2">${message || ''}</div>
+          </div>
+          ${isPrompt ? `<input id="dlg-input" type="text" value="${(inputValue || '').replace(/"/g, '&quot;')}" class="w-full px-3.5 py-2.5 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold focus:shadow-glow transition-all mb-5" />` : ''}
+          <div class="flex justify-end gap-2.5">
+            ${!isAlert ? `<button id="dlg-cancel" class="px-4 py-2 rounded-lg text-xs font-semibold text-brand-muted hover:text-brand-ink hover:bg-brand-panel2 transition-all">${cancelText || 'Cancel'}</button>` : ''}
+            <button id="dlg-ok" class="px-4 py-2 rounded-lg text-xs font-semibold transition-all active:scale-[.97] ${danger ? 'bg-brand-terracotta text-white hover:brightness-110' : 'bg-brand-gold text-brand-navy hover:brightness-105'}">${confirmText || 'OK'}</button>
           </div>
         </div>
       </div>`;

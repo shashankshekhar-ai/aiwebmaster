@@ -8,6 +8,7 @@ from auth.bootstrap import bootstrap_admin
 from auth.router import router as auth_router
 from core.ai_settings import init_ai_settings_table
 from db.agent_sessions import init_agent_tables
+from db.ai_usage import init_ai_usage_table
 from db.audit import init_audit_table
 from db.chat_sessions import init_chat_tables
 from db.deploy_state import init_deploy_state_table
@@ -45,6 +46,10 @@ def on_startup() -> None:
         init_agent_tables()
     except Exception:
         logger.exception("failed to init agent terminal session tables")
+    try:
+        init_ai_usage_table()
+    except Exception:
+        logger.exception("failed to init aiwebmaster_ai_usage table")
 
 
 @app.get("/health")
@@ -52,49 +57,52 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+_NO_CACHE_HEADERS = {"Cache-Control": "no-cache, must-revalidate"}
+
+
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse("static/index.html")
+    return FileResponse("static/index.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/login")
 def login_page() -> FileResponse:
-    return FileResponse("static/login.html")
+    return FileResponse("static/login.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/browse")
 def browse_page() -> FileResponse:
-    return FileResponse("static/browse.html")
+    return FileResponse("static/browse.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/users")
 def users_page() -> FileResponse:
-    return FileResponse("static/users.html")
+    return FileResponse("static/users.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/system")
 def system_page() -> FileResponse:
-    return FileResponse("static/system.html")
+    return FileResponse("static/system.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/settings")
 def settings_page() -> FileResponse:
-    return FileResponse("static/settings.html")
+    return FileResponse("static/settings.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/git")
 def git_page() -> FileResponse:
-    return FileResponse("static/git.html")
+    return FileResponse("static/git.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/deploy")
 def deploy_page() -> FileResponse:
-    return FileResponse("static/deploy.html")
+    return FileResponse("static/deploy.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/agent")
 def agent_page() -> FileResponse:
-    return FileResponse("static/agent.html")
+    return FileResponse("static/agent.html", headers=_NO_CACHE_HEADERS)
 
 
 app.include_router(auth_router, prefix="/api")

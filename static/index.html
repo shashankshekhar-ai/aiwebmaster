@@ -235,12 +235,33 @@ function avatar(role) {
 }
 
 function addMsg(role, text) {
+  const isUser = role === 'user';
   const row = document.createElement('div');
-  row.className = `flex gap-3 max-w-[85%] animate-fade-in-up ${role === 'user' ? 'self-end flex-row-reverse' : 'self-start'}`;
-  const bubble = role === 'user'
-    ? 'bg-brand-teal text-white rounded-2xl rounded-tr-sm'
-    : 'bg-brand-panel border border-brand-border rounded-2xl rounded-tl-sm';
-  row.innerHTML = `${avatar(role)}<div class="${bubble} px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap">${text.replace(/</g,'&lt;')}</div>`;
+  row.className = `flex gap-3 max-w-[85%] animate-fade-in-up ${isUser ? 'self-end' : 'self-start'}`;
+
+  const avatarEl = document.createElement('div');
+  avatarEl.innerHTML = avatar(role);
+
+  const col = document.createElement('div');
+  col.className = `flex flex-col min-w-0 ${isUser ? 'items-end' : 'items-start'}`;
+
+  const bubbleEl = document.createElement('div');
+  bubbleEl.className = isUser
+    ? 'px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap rounded-2xl rounded-tr-sm shadow-panel text-white'
+    : 'px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap rounded-2xl rounded-tl-sm shadow-panel bg-brand-panel border border-brand-border';
+  if (isUser) bubbleEl.style.backgroundColor = '#3fa39a'; // brand-teal, inline as a hard guarantee alongside the Tailwind class
+  bubbleEl.textContent = text;
+
+  const timeEl = document.createElement('div');
+  timeEl.className = 'text-[10px] text-brand-muted mt-1 px-1';
+  timeEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  col.appendChild(bubbleEl);
+  col.appendChild(timeEl);
+
+  if (isUser) { row.appendChild(col); row.appendChild(avatarEl); }
+  else { row.appendChild(avatarEl); row.appendChild(col); }
+
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
   return row;
@@ -351,11 +372,9 @@ function followUpEl(action, result) {
   return wrap;
 }
 
-// One-line plain-English summary for the action types non-technical users
-// (ui_editor et al) actually see — content/nav_link. Everything else
-// (docker/sql/code_edit/codegen_agent/git) keeps the raw-JSON payload view
-// below; those roles are technical by definition now that nav filtering
-// (sidebar.js) keeps non-technical users off the pages that could propose them.
+// One-line plain-English summary shown on every proposed-action card, so
+// approving a change doesn't require reading the JSON payload first — the
+// "Show details" toggle still has the raw payload for anyone who wants it.
 function friendlySummary(a) {
   const p = a.payload || {};
   if (a.type === 'content') {
@@ -366,7 +385,81 @@ function friendlySummary(a) {
     const verb = p.remove ? 'Remove' : 'Add/update';
     return `${verb} '${p.label || ''}' in the ${p.location || ''} nav`;
   }
+  if (a.type === 'docker') {
+    const services = (p.services || []).join(', ') || 'service';
+    const opLabel = { rebuild: 'Rebuild and restart', restart: 'Restart', start: 'Start', stop: 'Stop' }[p.op || 'rebuild'] || 'Update';
+    const env = p.env === 'staging' ? 'staging' : 'dev';
+    return `${opLabel} ${services} on ${env}`;
+  }
+  if (a.type === 'git') {
+    if (p.op === 'discard') {
+      return p.files && p.files.length ? `Discard uncommitted changes to: ${p.files.join(', ')}` : 'Discard ALL uncommitted changes';
+    }
+    return `Save code changes to Git${p.push ? ' and push' : ''}: "${p.message || ''}"`;
+  }
+  if (a.type === 'sql') {
+    const verb = (p.statement || '').trim().split(/\s+/)[0]?.toUpperCase() || 'Run';
+    return `Run a ${verb} command directly on the ${p.database || '?'} database`;
+  }
+  if (a.type === 'code_edit') {
+    return p.mode === 'write' ? `Create/overwrite file: ${p.file || ''}` : `Edit file: ${p.file || ''}`;
+  }
+  if (a.type === 'codegen_agent') {
+    const prompt = (p.prompt || '').slice(0, 140);
+    return `Hand this task to an AI coding agent: "${prompt}${(p.prompt || '').length > 140 ? '…' : ''}"`;
+  }
+  if (a.type === 'publish') return 'Publish current dev content + code to staging (backs up staging first)';
+  if (a.type === 'rollback') return 'Restore staging from the most recent backup';
+  if (a.type === 'nginx' || a.type === 'system') return `Suggested command (draft only — you run it by hand): ${p.command || ''}`;
   return null;
+}
+
+// Plain-English one-liner for a completed action's raw result, posted both on
+// the action card and as a new chat message — approving something shouldn't
+// leave you guessing whether it actually finished. Every action type gets a
+// line; docker gets an extra service-specific phrasing since "done" there
+// specifically means "the new container is live."
+function friendlyResultSummary(a, ok, data) {
+  const p = a.payload || {};
+  if (a.type === 'docker') {
+    const services = (p.services || []).join(', ') || 'the service';
+    const opLabel = { rebuild: 'rebuilt and restarted', restart: 'restarted', start: 'started', stop: 'stopped' }[p.op || 'rebuild'] || 'updated';
+    const env = p.env === 'staging' ? 'staging' : 'dev';
+    if (ok) return `${services} ${opLabel} successfully on ${env}. It's live now.`;
+    const failedStep = (data.steps || []).find(s => !s.ok);
+    const why = failedStep ? (failedStep.stderr || failedStep.stdout || '').trim().slice(-300) : '';
+    return `${services} failed to ${p.op || 'rebuild'} on ${env}.${why ? ' Reason: ' + why : ''}`;
+  }
+  const what = friendlySummary(a) || `This ${a.type} action`;
+  if (ok) {
+    if (a.type === 'nav_link' && data.live_check) {
+      const lc = data.live_check;
+      if (lc.checked && !lc.visible) {
+        return `${what} — saved, but I checked the live dev homepage and don't see it reflected there yet. It might need a moment (cache), or the page that should show it may not actually read this navigation data — worth a manual look before assuming it's live.`;
+      }
+      if (lc.checked && lc.visible) {
+        return `${what} — done, and confirmed visible on the live dev homepage.`;
+      }
+    }
+    if (a.type === 'content' && data.live_check) {
+      const lc = data.live_check;
+      if (!lc.checked && lc.reason === 'saved as draft, not published') {
+        return `${what} — saved as a draft (not live on purpose — publish it to make it visible).`;
+      }
+      if (lc.checked && !lc.visible) {
+        return `${what} — saved, but I checked ${lc.path} on the live dev site and don't see the change reflected yet. Might just need a moment, or worth a manual look.`;
+      }
+      if (lc.checked && lc.visible) {
+        return `${what} — done, and confirmed visible at ${lc.path} on the live dev site.`;
+      }
+    }
+    if (a.type === 'codegen_agent' && data.resumed) {
+      return `${what} — done, continuing the same Claude Code conversation from earlier in this chat.`;
+    }
+    return `${what} — done.`;
+  }
+  const why = (data && (data.detail?.error || data.error)) || '';
+  return `${what} — failed.${why ? ' ' + String(why).slice(0, 300) : ''}`;
 }
 
 function addActions(actions) {
@@ -404,27 +497,45 @@ function addActions(actions) {
       btn.className = 'px-3.5 py-1.5 rounded-lg bg-brand-gold text-brand-navy text-xs font-semibold transition-all hover:brightness-105 active:scale-[.97] disabled:opacity-50';
       btn.onclick = async () => {
         btn.disabled = true;
-        btn.textContent = 'Running…';
-        const out = document.createElement('pre');
-        out.className = 'text-[11px] bg-brand-navy2 border border-brand-border rounded-lg p-3 mt-2 overflow-auto max-h-56 animate-fade-in';
+        btn.innerHTML = `<span class="inline-flex items-center gap-1.5"><span class="w-3 h-3 border-2 border-brand-navy/40 border-t-brand-navy rounded-full animate-spin"></span>Running…</span>`;
+        const rawJson = document.createElement('pre');
+        rawJson.className = 'text-[11px] bg-brand-navy2 border border-brand-border rounded-lg p-3 overflow-auto max-h-56';
+        const resultWrap = document.createElement('div');
+        resultWrap.className = 'mt-2 animate-fade-in';
         try {
           const res = await fetch('/api/actions/run', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: a.id, type: a.type, payload: a.payload }),
+            body: JSON.stringify({ id: a.id, type: a.type, payload: a.payload, session_id: currentSessionId }),
           });
           const data = await res.json();
-          out.textContent = JSON.stringify(data, null, 2);
+          rawJson.textContent = JSON.stringify(data, null, 2);
+          const summary = friendlyResultSummary(a, res.ok, data);
+          if (summary) {
+            const line = document.createElement('div');
+            line.className = `text-xs mb-1.5 ${res.ok ? 'text-emerald-400' : 'text-brand-terracotta'}`;
+            line.textContent = (res.ok ? '✓ ' : '✗ ') + summary;
+            resultWrap.appendChild(line);
+            addMsg('assistant', (res.ok ? '✓ ' : '✗ ') + summary);
+          }
+          const details = document.createElement('details');
+          details.innerHTML = `<summary class="text-[11px] text-brand-muted cursor-pointer hover:text-brand-ink">Show raw output</summary>`;
+          details.appendChild(rawJson);
+          resultWrap.appendChild(details);
           btn.textContent = res.ok ? '✓ Done' : 'Failed';
           btn.className = res.ok
             ? 'px-3.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-semibold'
             : 'px-3.5 py-1.5 rounded-lg bg-brand-terracotta/20 text-brand-terracotta text-xs font-semibold';
           if (res.ok) footer.appendChild(followUpEl(a, data));
         } catch (e) {
-          out.textContent = String(e);
+          rawJson.textContent = String(e);
+          const details = document.createElement('details');
+          details.innerHTML = `<summary class="text-[11px] text-brand-muted cursor-pointer hover:text-brand-ink">Show raw output</summary>`;
+          details.appendChild(rawJson);
+          resultWrap.appendChild(details);
           btn.textContent = 'Failed';
         }
-        footer.appendChild(out);
+        footer.appendChild(resultWrap);
       };
       footer.appendChild(btn);
     }
@@ -437,10 +548,13 @@ function addTyping() {
   const row = document.createElement('div');
   row.id = 'typing-indicator';
   row.className = 'flex gap-3 max-w-[85%] self-start animate-fade-in';
-  row.innerHTML = `${avatar('assistant')}<div class="bg-brand-panel border border-brand-border rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1 items-center">
-    <span class="w-1.5 h-1.5 rounded-full bg-brand-muted animate-bounce" style="animation-delay:0ms"></span>
-    <span class="w-1.5 h-1.5 rounded-full bg-brand-muted animate-bounce" style="animation-delay:150ms"></span>
-    <span class="w-1.5 h-1.5 rounded-full bg-brand-muted animate-bounce" style="animation-delay:300ms"></span>
+  row.innerHTML = `${avatar('assistant')}<div class="bg-brand-panel border border-brand-gold/30 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-2.5 items-center shadow-glow">
+    <span class="text-xs text-brand-muted">Thinking</span>
+    <span class="flex gap-1 items-center">
+      <span class="w-2 h-2 rounded-full bg-brand-gold animate-bounce" style="animation-delay:0ms"></span>
+      <span class="w-2 h-2 rounded-full bg-brand-gold animate-bounce" style="animation-delay:150ms"></span>
+      <span class="w-2 h-2 rounded-full bg-brand-gold animate-bounce" style="animation-delay:300ms"></span>
+    </span>
   </div>`;
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
