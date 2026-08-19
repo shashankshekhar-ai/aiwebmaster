@@ -302,6 +302,24 @@ battle-tested end-to-end (no live publish run during this session — too
 slow/disruptive to test blind); `GET /api/deploy/diff` itself confirmed
 working via curl.
 
+## Real bug found+fixed: Tailwind CDN config was silently empty in every browser
+
+**Never trust curl for visual verification** — curl only proves class *names*
+are present in the served HTML, not that they render. The whole "cohesive
+dark navy/gold theme" had likely never actually rendered correctly in a real
+browser, on any page, ever. Root cause: every page's `<head>` loaded
+`assets/theme.js` (sets `window.tailwind.config`) *before*
+`https://cdn.tailwindcss.com` — the CDN script overwrites `window.tailwind`
+on init, wiping the pre-set config. Confirmed via headless Chromium
+(Playwright, installed ad hoc for this check — not a project dependency):
+`window.tailwind.config` evaluated to `{}` on the live site, and custom
+tokens (`brand-navy`, `shadow-panel`, etc.) fell through to unstyled
+black-on-white. Fixed by swapping script order in all 9 HTML files (CDN
+first, `theme.js` after — matches Tailwind's documented pattern). Re-verified
+with real screenshots this time, not curl — dark theme, gold accents, text
+contrast all correct now. **Takeaway for next session: screenshot real pages
+after CSS/JS-load-order changes, don't just curl for class-name presence.**
+
 ## Recently added, less thoroughly battle-tested
 
 - Visual polish pass across all 8 pages (`static/*.html`, `assets/theme.js`,
@@ -309,11 +327,24 @@ working via curl.
   shadow tokens in `theme.js`; every page body now has the gradient-navy +
   ambient radial-glow backdrop that `login.html` already had; `shadow-panel`
   added to all card `<div>`s (settings, users, system, git, deploy); browse.html
-  card hover upgraded to `shadow-lift`; sidebar `<aside>` got `shadow-lift`.
-  Purely cosmetic (Tailwind class changes only, no JS/logic touched).
-  Rebuilt + force-recreated `aiwebmaster`, confirmed new classes present in
-  the served HTML via authenticated curl on `/` and `/settings` — not yet
-  eyeballed in a real browser.
+  card hover upgraded to `shadow-lift`; sidebar `<aside>` got `shadow-lift`,
+  then changed to solid black (`bg-black/95`, `border-white/10`) per a later
+  request. Agent Terminal's session-list expand chevron moved onto the
+  "Agent Terminal" nav row itself (was a separate row tied to "+ New
+  session"), matching the Chat menu's chevron placement. Now confirmed via
+  real screenshots (see bug note above), not just curl.
+- `ui_editor` role now also has `code_edit` permission (was `content`,
+  `nav_link` only) — updated in both RBAC gates (`auth/permissions.py`
+  server-side, `sidebar.js` `ROLE_PERMISSIONS` client-side); `code_edit`'s
+  blocklist (`.env`, `.git/`, `apps/aiwebmaster/auth/`) is unconditional
+  regardless of role, so this doesn't touch that boundary. Deliberate scope
+  widening, confirmed with the user first — ui_editor was previously kept
+  off `code_edit` on purpose (see v9 addendum above) so this reverses part
+  of that restriction.
+- System page (`/system`) now shows a "Recent activity" feed — reuses the
+  existing `aiwebmaster_audit` table via `/api/deploy/activity` (already
+  built for the Deploy page), just not previously surfaced on System.
+  Verified via curl returning real historical rows.
 - Chat sessions (list/rename/delete, sidebar submenu) — DB-backed, works via
   curl tests, but see the open bug above for real-browser rendering.
 - Shared in-app dialog (`dialogPrompt`/`dialogConfirm`/`dialogAlert` in
