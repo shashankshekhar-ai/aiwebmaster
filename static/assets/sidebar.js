@@ -40,7 +40,8 @@ function renderShell(activePath) {
       <span class="${active ? 'text-brand-gold' : 'text-brand-muted group-hover:text-brand-gold'} transition-colors">${svgIcon(item.icon)}</span>
       <span class="flex-1">${item.label}</span>
       ${item.path === '/git' ? '<span id="nav-git-badge" class="hidden text-[10px] font-bold bg-brand-terracotta text-white rounded-full w-4 h-4 items-center justify-center"></span>' : ''}
-    </a>`;
+    </a>
+    ${item.path === '/agent' ? '<div id="agent-menu"></div>' : ''}`;
   }).join('');
 
   return `
@@ -89,6 +90,7 @@ async function mountShell(activePath) {
 
   filterNav(me);
   await mountChatMenu(activePath);
+  await mountAgentMenu(activePath);
   updateGitBadge();
 
   document.getElementById('sidebar-who').innerHTML = `
@@ -283,6 +285,73 @@ async function mountChatMenu(activePath) {
   await render();
 }
 
+// Agent Terminal's session list, in the shared left sidebar under the
+// "Agent Terminal" nav item — mirrors mountChatMenu's pattern so Agent
+// Terminal stops having its own separate side panel (was two side-by-side
+// sidebars: this shared one, and agent.html's own <aside>). The slot only
+// exists in the DOM for roles that pass Agent Terminal's nav filter
+// (requires: 'codegen_agent'), so no extra 403 handling needed here.
+async function mountAgentMenu(activePath) {
+  const wrap = document.getElementById('agent-menu');
+  if (!wrap) return; // nav item filtered out for this role — nothing to mount
+
+  const params = new URLSearchParams(window.location.search);
+  const currentSessionId = activePath === '/agent' && params.get('session') ? parseInt(params.get('session')) : null;
+  let expanded = localStorage.getItem('aiwebmaster_agent_menu_expanded') !== '0';
+
+  async function render() {
+    let sessions = [];
+    try {
+      const r = await fetch('/api/agent/sessions');
+      if (r.ok) sessions = (await r.json()).sessions || [];
+    } catch (e) { /* ignore, show empty */ }
+
+    const sessionsHtml = sessions.length
+      ? sessions.map((s, i) => `
+        <div class="group flex items-center gap-1 rounded-lg pl-8 pr-1.5 py-1.5 text-xs transition-all animate-fade-in-left
+          ${s.id === currentSessionId ? 'bg-brand-panel2 text-brand-ink' : 'text-brand-muted hover:bg-brand-panel/70 hover:text-brand-ink'}"
+          style="animation-delay:${Math.min(i*20,160)}ms">
+          <a href="/agent?session=${s.id}" class="flex-1 truncate" title="${s.title.replace(/"/g,'&quot;')}">${s.title.replace(/</g,'&lt;')}</a>
+          ${s.tool ? `<span class="text-[9px] px-1 py-0.5 rounded bg-brand-panel2 text-brand-muted shrink-0 group-hover:hidden">${s.tool}</span>` : ''}
+          <button data-agent-delete="${s.id}" class="hidden group-hover:inline-flex text-brand-muted hover:text-brand-terracotta p-0.5 shrink-0">${svgIcon('M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16').replace('w-[18px] h-[18px]','w-3 h-3')}</button>
+        </div>`).join('')
+      : `<div class="text-[11px] text-brand-muted pl-8 py-1.5">No sessions yet</div>`;
+
+    wrap.innerHTML = `
+      <div class="flex items-center gap-1 rounded-lg px-1 py-1">
+        <a href="/agent" class="flex-1 flex items-center gap-2 rounded-lg pl-8 pr-2 py-1.5 text-xs font-medium text-brand-gold hover:bg-brand-panel/70 transition-all">
+          + New session
+        </a>
+        <button id="agent-menu-toggle" class="p-1.5 text-brand-muted hover:text-brand-ink transition-transform" style="transform: rotate(${expanded ? '90' : '0'}deg)">
+          ${svgIcon('M9 5l7 7-7 7').replace('w-[18px] h-[18px]','w-3.5 h-3.5')}
+        </button>
+      </div>
+      <div id="agent-submenu" class="${expanded ? '' : 'hidden'} flex flex-col gap-0.5 mt-0.5 mb-1">
+        ${sessionsHtml}
+      </div>`;
+
+    document.getElementById('agent-menu-toggle').onclick = (e) => {
+      e.preventDefault();
+      expanded = !expanded;
+      localStorage.setItem('aiwebmaster_agent_menu_expanded', expanded ? '1' : '0');
+      document.getElementById('agent-submenu').classList.toggle('hidden', !expanded);
+      document.getElementById('agent-menu-toggle').style.transform = `rotate(${expanded ? '90' : '0'}deg)`;
+    };
+    wrap.querySelectorAll('[data-agent-delete]').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const id = btn.dataset.agentDelete;
+        if (!(await dialogConfirm('Delete this agent session? This cannot be undone.', { confirmText: 'Delete', danger: true }))) return;
+        await fetch(`/api/agent/sessions/${id}`, { method: 'DELETE' });
+        if (String(currentSessionId) === id) { window.location.href = '/agent'; return; }
+        render();
+      };
+    });
+  }
+
+  await render();
+}
+
 const ROLE_PERMISSIONS = {
   docker_ops: ['docker', 'git'],
   ui_editor: ['content', 'nav_link'],
@@ -302,6 +371,7 @@ function filterNav(me) {
     if (item.requires && !canRun(me, item.requires)) {
       const el = document.querySelector(`[data-nav-item="${item.path}"]`);
       if (el) el.remove();
+      if (item.path === '/agent') document.getElementById('agent-menu')?.remove();
     }
   });
 }

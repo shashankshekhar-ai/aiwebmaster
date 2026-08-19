@@ -11,31 +11,29 @@
 <body class="bg-brand-navy text-brand-ink font-sans antialiased">
 <div id="app-root"></div>
 
-<div id="page-content" class="flex-1 flex min-w-0 overflow-hidden h-screen">
-  <aside class="w-64 shrink-0 border-r border-brand-border flex flex-col p-3 overflow-y-auto">
-    <button id="new-session-btn" class="w-full mb-3 px-3 py-2 rounded-lg bg-brand-gold/15 text-brand-gold text-xs font-semibold hover:bg-brand-gold/25 transition-all">+ New session</button>
-    <div id="session-list" class="flex flex-col gap-0.5"></div>
-  </aside>
-
-  <div class="flex-1 flex flex-col min-w-0">
-    <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur flex items-center justify-between">
-      <div>
-        <h1 id="session-title" class="text-sm font-semibold">Agent Terminal</h1>
-        <p class="text-xs text-brand-muted mt-0.5">Drives claude-agent/codex-agent directly — full file-edit + bash, isolated dev-only sandbox, no prod/db/docker-socket reach.</p>
-      </div>
-      <span id="tool-badge" class="hidden text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-brand-panel2 text-brand-muted"></span>
-    </header>
-
-    <div id="term" class="flex-1 overflow-y-auto p-4 font-mono text-[12px] leading-relaxed space-y-1"></div>
-
-    <div id="denied" class="hidden flex-1 flex items-center justify-center text-sm text-brand-terracotta">Your role can't access the Agent Terminal — needs infra_admin or super_admin.</div>
-
-    <div id="composer" class="border-t border-brand-border p-3 flex gap-2 items-end">
-      <textarea id="prompt-input" rows="2" placeholder="Describe the change… (Enter to send, Shift+Enter for newline)"
-        class="flex-1 resize-none px-3 py-2 rounded-lg bg-brand-panel border border-brand-border text-sm outline-none focus:border-brand-gold transition-all"></textarea>
-      <button id="send-btn" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-xs font-semibold hover:brightness-105 active:scale-[.97] transition-all disabled:opacity-50">Send</button>
-      <button id="stop-btn" class="hidden px-4 py-2 rounded-lg bg-brand-terracotta/20 text-brand-terracotta text-xs font-semibold hover:bg-brand-terracotta/30 transition-all">Stop</button>
+<div id="page-content" class="flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+  <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur flex items-center justify-between animate-fade-in">
+    <div>
+      <h1 id="session-title" class="text-sm font-semibold">Agent Terminal</h1>
+      <p class="text-xs text-brand-muted mt-0.5">Drives claude-agent/codex-agent directly — full file-edit + bash, isolated dev-only sandbox, no prod/db/docker-socket reach.</p>
     </div>
+    <span id="tool-badge" class="hidden text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-brand-panel2 text-brand-muted"></span>
+  </header>
+
+  <div id="term" class="flex-1 overflow-y-auto p-4 font-mono text-[12px] leading-relaxed space-y-1"></div>
+
+  <div id="empty-state" class="hidden flex-1 flex flex-col items-center justify-center text-center px-6">
+    <div class="text-sm text-brand-ink font-medium mb-1.5">No session open</div>
+    <div class="text-xs text-brand-muted max-w-sm">Pick one from "Agent Terminal" in the left sidebar, or start a new one below.</div>
+  </div>
+
+  <div id="denied" class="hidden flex-1 flex items-center justify-center text-sm text-brand-terracotta">Your role can't access the Agent Terminal — needs infra_admin or super_admin.</div>
+
+  <div id="composer" class="border-t border-brand-border p-3 flex gap-2 items-end">
+    <textarea id="prompt-input" rows="2" placeholder="Describe the change… (Enter to send, Shift+Enter for newline)"
+      class="flex-1 resize-none px-3 py-2 rounded-lg bg-brand-panel border border-brand-border text-sm outline-none focus:border-brand-gold transition-all"></textarea>
+    <button id="send-btn" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-xs font-semibold hover:brightness-105 active:scale-[.97] transition-all disabled:opacity-50">Send</button>
+    <button id="stop-btn" class="hidden px-4 py-2 rounded-lg bg-brand-terracotta/20 text-brand-terracotta text-xs font-semibold hover:bg-brand-terracotta/30 transition-all">Stop</button>
   </div>
 </div>
 
@@ -48,48 +46,6 @@ let running = false;
 let currentOutputLine = null;
 
 function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
-
-function timeAgo(iso) {
-  const s = Math.floor((Date.now() - new Date(iso.replace(' ', 'T'))) / 1000);
-  if (isNaN(s)) return '';
-  if (s < 60) return 'now';
-  if (s < 3600) return Math.floor(s / 60) + 'm';
-  if (s < 86400) return Math.floor(s / 3600) + 'h';
-  return Math.floor(s / 86400) + 'd';
-}
-
-async function loadSessions() {
-  const list = document.getElementById('session-list');
-  const res = await fetch('/api/agent/sessions');
-  if (res.status === 403) { document.getElementById('denied').classList.remove('hidden'); document.getElementById('composer').classList.add('hidden'); return []; }
-  const { sessions } = await res.json();
-  list.innerHTML = sessions.length
-    ? sessions.map(s => `
-      <div class="group flex items-center gap-1 rounded-lg pl-3 pr-1.5 py-1.5 text-xs cursor-pointer transition-all
-        ${s.id === currentSessionId ? 'bg-brand-panel2 text-brand-ink' : 'text-brand-muted hover:bg-brand-panel/70 hover:text-brand-ink'}"
-        data-open="${s.id}">
-        <span class="flex-1 truncate" title="${esc(s.title)}">${esc(s.title)}</span>
-        ${s.tool ? `<span class="text-[9px] px-1 py-0.5 rounded bg-brand-panel2 text-brand-muted shrink-0">${s.tool}</span>` : ''}
-        <span class="text-[9px] text-brand-muted shrink-0">${timeAgo(s.updated_at)}</span>
-        <button data-delete="${s.id}" class="hidden group-hover:inline text-brand-muted hover:text-brand-terracotta text-xs shrink-0 px-1">✕</button>
-      </div>`).join('')
-    : `<div class="text-[11px] text-brand-muted px-3 py-2">No sessions yet</div>`;
-
-  list.querySelectorAll('[data-open]').forEach(el => {
-    el.onclick = (e) => { if (e.target.dataset.delete) return; openSession(parseInt(el.dataset.open)); };
-  });
-  list.querySelectorAll('[data-delete]').forEach(btn => {
-    btn.onclick = async (e) => {
-      e.stopPropagation();
-      const id = btn.dataset.delete;
-      if (!(await dialogConfirm('Delete this session? This cannot be undone.', { confirmText: 'Delete', danger: true }))) return;
-      await fetch(`/api/agent/sessions/${id}`, { method: 'DELETE' });
-      if (String(currentSessionId) === id) { currentSessionId = null; document.getElementById('term').innerHTML = ''; setToolBadge(null); }
-      loadSessions();
-    };
-  });
-  return sessions;
-}
 
 function setToolBadge(tool) {
   const badge = document.getElementById('tool-badge');
@@ -199,7 +155,7 @@ async function openSession(id) {
   setToolBadge(session.tool);
   term.innerHTML = '';
   events.forEach(e => appendLine(e.type, e.content));
-  loadSessions();
+  mountAgentMenu('/agent');
   connectWs(id);
 }
 
@@ -224,32 +180,27 @@ function connectWs(id) {
       appendLine('error', msg.data);
     } else if (msg.type === 'done') {
       setRunning(false);
-      loadSessions();
+      mountAgentMenu('/agent');
     }
   };
   ws.onclose = () => { setRunning(false); };
   return opened;
 }
 
-document.getElementById('new-session-btn').onclick = async () => {
-  const res = await fetch('/api/agent/sessions', { method: 'POST' });
-  if (!res.ok) return;
-  const s = await res.json();
-  await loadSessions();
-  openSession(s.id);
-};
-
 document.getElementById('send-btn').onclick = async () => {
   const input = document.getElementById('prompt-input');
   const prompt = input.value.trim();
   if (!prompt || running) return;
+  document.getElementById('empty-state').classList.add('hidden');
+  document.getElementById('term').classList.remove('hidden');
   if (!currentSessionId) {
     const res = await fetch('/api/agent/sessions', { method: 'POST' });
     if (!res.ok) return;
     const s = await res.json();
     currentSessionId = s.id;
+    window.history.replaceState({}, '', '/agent?session=' + s.id);
     await connectWs(s.id);
-    await loadSessions();
+    await mountAgentMenu('/agent');
   }
   input.value = '';
   setRunning(true);
@@ -267,8 +218,23 @@ document.getElementById('stop-btn').onclick = () => {
 (async () => {
   me = await mountShell('/agent');
   if (!me) return;
-  const sessions = await loadSessions();
-  if (sessions.length) openSession(sessions[0].id);
+
+  const res = await fetch('/api/agent/sessions');
+  if (res.status === 403) {
+    document.getElementById('denied').classList.remove('hidden');
+    document.getElementById('composer').classList.add('hidden');
+    document.getElementById('term').classList.add('hidden');
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const sid = params.get('session');
+  if (sid) {
+    openSession(parseInt(sid));
+  } else {
+    document.getElementById('term').classList.add('hidden');
+    document.getElementById('empty-state').classList.remove('hidden');
+  }
 })();
 </script>
 </body>
