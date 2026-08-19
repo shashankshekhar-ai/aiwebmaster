@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { path: '/users', label: 'Users', icon: 'M12 4.5a4 4 0 100 8 4 4 0 000-8zM4 20a8 8 0 0116 0', requires: 'user_management' },
   { path: '/system', label: 'System', icon: 'M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 7h10v10H7V7z', requires: 'docker' },
   { path: '/settings', label: 'Settings', icon: 'M10.325 4.317a1 1 0 011.35-.936l.379.15a1 1 0 001.298-.53l.198-.38a1 1 0 011.766.93l-.15.38a1 1 0 00.53 1.298l.38.198a1 1 0 01-.93 1.766l-.38-.15a1 1 0 00-1.298.53l-.198.38a1 1 0 01-1.766-.93l.15-.38a1 1 0 00-.53-1.298l-.38-.198a1 1 0 01-.319-.15zM12 15a3 3 0 100-6 3 3 0 000 6z', requires: 'user_management' },
+  { path: '/help', label: 'Help', icon: 'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', requires: null },
 ];
 
 function svgIcon(d) {

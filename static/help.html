@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AIwebmaster — Help</title>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="/assets/theme.js"></script>
+</head>
+<body class="bg-gradient-to-b from-brand-navy to-brand-navy2 text-brand-ink font-sans antialiased relative">
+<div class="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_15%_0%,rgba(63,163,154,.08),transparent_40%),radial-gradient(circle_at_85%_100%,rgba(245,185,63,.06),transparent_40%)]"></div>
+<div id="app-root" class="relative z-10"></div>
+
+<div id="page-content" class="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
+  <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
+    <h1 class="text-sm font-semibold">Help</h1>
+    <p class="text-xs text-brand-muted mt-0.5">How to make and ship a change with AIwebmaster.</p>
+  </header>
+  <div id="content" class="flex-1 overflow-y-auto p-6"></div>
+</div>
+
+<script src="/assets/sidebar.js"></script>
+<script>
+function section(title, bodyHtml, delay) {
+  return `<div class="bg-brand-panel border border-brand-border rounded-xl p-6 shadow-panel animate-fade-in-up mb-6" style="animation-delay:${delay}ms">
+    <h2 class="text-sm font-semibold text-brand-ink mb-3">${title}</h2>
+    <div class="text-sm text-brand-muted leading-relaxed space-y-3">${bodyHtml}</div>
+  </div>`;
+}
+function step(n, text) {
+  return `<div class="flex gap-3">
+    <span class="shrink-0 w-5 h-5 rounded-full bg-brand-panel2 border border-brand-border flex items-center justify-center text-[11px] font-bold text-brand-gold">${n}</span>
+    <div class="pt-0.5">${text}</div>
+  </div>`;
+}
+
+async function init() {
+  const me = await mountShell('/help');
+  if (!me) return;
+
+  const canDeployDev = canRun(me, 'docker');
+  const canCode = canRun(me, 'code_edit') || canRun(me, 'codegen_agent');
+  const canGit = canRun(me, 'git');
+  const canStaging = canRunDockerEnv(me, 'staging');
+
+  document.getElementById('content').innerHTML = `
+    <div class="max-w-2xl">
+
+      ${section('The basic loop', `
+        <p>Everything works the same way everywhere in this app — Chat, Browse &amp; edit, Deploy: you describe what you want, AIwebmaster shows you a <b class="text-brand-ink">proposed action card</b> with a plain-English summary, and <b class="text-brand-ink">nothing happens until you click Run</b> on that card. You can always expand "Show details" on a card to see exactly what will run first.</p>
+      `, 0)}
+
+      ${section('Changing page text, images, or nav links', `
+        <p>Go to <b class="text-brand-ink">Browse &amp; edit</b>, find the page/post/nav link, and either edit the fields directly or click through to Chat with that item pre-loaded and just describe the change ("make this heading say X").</p>
+        <p>Content changes save as a <b class="text-brand-ink">draft</b> by default — say "publish it" if you want it live immediately, otherwise it won't affect the real site until published.</p>
+      `, 40)}
+
+      ${canCode ? section('Changing hardcoded text/styling in the code', `
+        <p>Some things (like the homepage hero heading) aren't in the CMS — they're written directly into the site's source code. You can still ask for these in Chat, e.g. <i>"make the homepage hero heading terracotta colored"</i>.</p>
+        <p>Two things can happen:</p>
+        ${step(1, `If the assistant already knows the exact current file content, it proposes a <b class="text-brand-ink">code_edit</b> card — a precise find-and-replace. Click Run.`)}
+        ${step(2, `If it needs to <i>find</i> the right file first (it can't read files itself), it proposes a <b class="text-brand-ink">codegen_agent</b> card instead — this hands the task to a real coding assistant that reads the code, makes the change, and shows you the diff. This can take a couple of minutes. Click Run, then review the diff.`)}
+        <p>Either way — if the assistant asks you to paste a code snippet, that just means it's choosing option 1 and needs the exact text to match against. You don't need to know which path it'll take; just describe the change.</p>
+      `, 80) : ''}
+
+      ${canCode && canDeployDev ? section('Making your change actually show up (dev)', `
+        <p>Editing the code doesn't automatically show it on the site — the dev site runs from a <b class="text-brand-ink">built container</b>, so it needs a rebuild to pick up your change.</p>
+        <p>After a successful code_edit/codegen_agent run, look for a <b class="text-brand-ink">"Rebuild &lt;service&gt; & Preview"</b> button right below the result — click it, wait (~1 minute), then click through to Preview (dev).</p>
+        <p>You can also do this manually from the <b class="text-brand-ink">Deploy</b> page — Start/Stop/Restart/Rebuild any dev service (cms/web/api) yourself. You'll only see controls for <b class="text-brand-ink">dev</b> there${canStaging ? '' : ' — staging is a separate environment your role can\'t touch, so those buttons are hidden'}.</p>
+      `, 120) : ''}
+
+      ${!canGit ? section('Important — your changes aren\'t saved to Git yet', `
+        <p>Your role can edit files and rebuild dev, but <b class="text-brand-ink">can't commit or push to Git</b>. That means your change is live on the dev site, but it's not yet permanently saved — if the code is rebuilt from a fresh checkout, or someone else's uncommitted work gets discarded, an uncommitted change of yours could be lost.</p>
+        <p>Once you're happy with a change, ask an admin (or a docker_ops/infra_admin/super_admin teammate) to commit it on the <b class="text-brand-ink">Git</b> page — that's what makes it permanent and reviewable in history.</p>
+      `, 160) : section('Saving your work permanently', `
+        <p>A code change only becomes permanent once it's committed. Go to the <b class="text-brand-ink">Git</b> page, write a short commit message describing what changed, and click Commit (check "also push" to send it to the remote repo).</p>
+      `, 160)}
+
+      ${section('What you can\'t do here', `
+        <ul class="list-disc pl-5 space-y-1">
+          ${canRun(me,'content') || canRun(me,'nav_link') ? '' : '<li>Edit page/post/nav content — ask an admin to grant this.</li>'}
+          ${canCode ? '' : '<li>Edit source code (code_edit / codegen_agent) — ask an admin to grant this.</li>'}
+          ${canDeployDev ? '' : '<li>Rebuild/restart dev services — ask an admin to grant this.</li>'}
+          <li>Publish to staging, roll staging back, or touch the staging environment at all — that's admin-only, on purpose.</li>
+          <li>Run raw SQL, manage users, or view/change AI provider settings — admin-only.</li>
+        </ul>
+      `, 200)}
+
+      ${section('If something goes wrong', `
+        <p>Every proposed and executed action — by anyone — is logged and visible on the <b class="text-brand-ink">System</b> page's "Recent activity" feed, and on Deploy's activity feed too. If a change didn't take effect, check there first: did it actually run, and did it succeed?</p>
+        <p>If a rebuild fails or a page looks broken, don't guess-and-retry — describe exactly what you see to the assistant in Chat and it can investigate (or hand off to codegen_agent to dig in).</p>
+      `, 240)}
+
+    </div>`;
+}
+init();
+</script>
+</body>
+</html>

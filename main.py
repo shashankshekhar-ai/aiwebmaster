@@ -90,6 +90,11 @@ def settings_page() -> FileResponse:
     return FileResponse("static/settings.html", headers=_NO_CACHE_HEADERS)
 
 
+@app.get("/help")
+def help_page() -> FileResponse:
+    return FileResponse("static/help.html", headers=_NO_CACHE_HEADERS)
+
+
 @app.get("/git")
 def git_page() -> FileResponse:
     return FileResponse("static/git.html", headers=_NO_CACHE_HEADERS)
