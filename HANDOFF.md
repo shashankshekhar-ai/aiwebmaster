@@ -225,6 +225,16 @@ actual browser as a non-`super_admin` user.
    v17, our Postgres is v16. Fixed by using plain-SQL dump + `sed` to strip
    the one incompatible `SET transaction_timeout` line, instead of custom-format
    `pg_restore`. Applies to both `publish`'s main dump and its pre-publish backup.
+6. **`git` action commits as root, leaving root-owned objects in the host's
+   `.git/objects`** — this container runs as root and writes directly into
+   the bind-mounted repo (including `.git`), so after any `git` action runs,
+   host-side git commands can fail with "insufficient permission for adding
+   an object to repository database" (hit this for real after the Gallery
+   e2e test's commit). Not fixed structurally (would mean moving this
+   container off root, which also touches its docker.sock access — real
+   scope, not attempted). Workaround: `sudo chown -R $USER:$USER
+   /path/to/repo/.git` on the host after any AIwebmaster-driven commit,
+   before running git commands there yourself.
 
 ## Open bug — mid-investigation when this handoff was written
 
