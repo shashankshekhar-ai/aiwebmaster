@@ -15,23 +15,120 @@
 <div id="page-content" class="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
   <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
     <h1 class="text-sm font-semibold">Help</h1>
-    <p class="text-xs text-brand-muted mt-0.5">How to make and ship a change with AIwebmaster.</p>
+    <p class="text-xs text-brand-muted mt-0.5">Every task this app can do — where to do it, and how. Grayed-out cases need a role you don't have.</p>
   </header>
   <div id="content" class="flex-1 overflow-y-auto p-6"></div>
 </div>
 
 <script src="/assets/sidebar.js"></script>
 <script>
-function section(title, bodyHtml, delay) {
-  return `<div class="bg-brand-panel border border-brand-border rounded-xl p-6 shadow-panel animate-fade-in-up mb-6" style="animation-delay:${delay}ms">
-    <h2 class="text-sm font-semibold text-brand-ink mb-3">${title}</h2>
-    <div class="text-sm text-brand-muted leading-relaxed space-y-3">${bodyHtml}</div>
-  </div>`;
+// One entry per distinct thing this app can do. `access` is a permission
+// slug checked with canRun() (see sidebar.js ROLE_PERMISSIONS) — 'staging'
+// is a special case checked with canRunDockerEnv() instead, since it's a
+// payload-level restriction (auth/permissions.py DOCKER_STAGING_ROLES), not
+// a plain action-type one. Kept in one flat list, data-driven, so a new
+// action type just means one more entry here instead of new prose.
+const CASES = [
+  { cat: 'Content', title: 'Edit a page, post, resource, or case study', where: 'Browse & edit', access: 'content',
+    steps: [
+      'Open <b class="text-brand-ink">Browse &amp; edit</b> in the sidebar and click the item (or "+ New").',
+      'Either edit the fields directly and Save, or click through to Chat with the item pre-loaded and describe the change in plain English.',
+      'Review the proposed <b class="text-brand-ink">content</b> action card, then click <b class="text-brand-ink">Run</b>.',
+      'Saved as a <b class="text-brand-ink">draft</b> by default — say "publish it" in Chat if you want it live immediately.',
+    ] },
+  { cat: 'Content', title: 'Add, update, or remove a nav link', where: 'Browse & edit → Navigation, or Chat', access: 'nav_link',
+    steps: [
+      'Open <b class="text-brand-ink">Browse &amp; edit</b> → Navigation, or just describe the change in Chat ("add a footer link to X").',
+      'Review the proposed <b class="text-brand-ink">nav_link</b> card, then click <b class="text-brand-ink">Run</b> — this one goes live immediately, no draft step.',
+    ] },
+  { cat: 'Code', title: 'Change hardcoded text/styling you (or the assistant) already know the exact wording of', where: 'Chat', access: 'code_edit',
+    steps: [
+      'Describe the change in Chat, e.g. "make the homepage hero heading terracotta colored".',
+      'If asked, paste the exact current snippet — the assistant does a precise find-and-replace, so it needs exact text to match against.',
+      'Review the proposed <b class="text-brand-ink">code_edit</b> card, then click <b class="text-brand-ink">Run</b>.',
+      'Then see "Rebuild a dev service" below — editing the file alone doesn\'t update the live dev site.',
+    ] },
+  { cat: 'Code', title: "Change code you don't have the exact text for, or that needs finding/reading first", where: 'Chat (or Agent Terminal for a live multi-turn session)', access: 'codegen_agent',
+    steps: [
+      'Describe the goal in Chat — what to change and why. No need to know the file path or exact wording.',
+      'Review the proposed <b class="text-brand-ink">codegen_agent</b> card, then click <b class="text-brand-ink">Run</b> — this hands the task to a real coding assistant with its own file-read/bash access, in an isolated dev-only sandbox. Can take a couple of minutes.',
+      'Review the diff it returns before trusting it — this is a real agent making a real edit, not a mechanical find-and-replace.',
+      'For a longer back-and-forth instead of one-shot requests, use <b class="text-brand-ink">Agent Terminal</b> in the sidebar directly — same underlying sandbox, live multi-turn conversation.',
+    ] },
+  { cat: 'Code', title: 'Rebuild a dev service so a code change actually shows up', where: '"Rebuild & Preview" button in Chat, or the Deploy page', access: 'docker',
+    steps: [
+      'After a successful code_edit/codegen_agent Run, a <b class="text-brand-ink">"Rebuild &lt;service&gt; & Preview"</b> button appears below the result — click it and wait (~1 minute).',
+      'Or do it manually: open <b class="text-brand-ink">Deploy</b>, find the service under "Development", click <b class="text-brand-ink">Rebuild</b>.',
+      'Click <b class="text-brand-ink">Preview (dev)</b> (top-right in Chat, or on Deploy) to see the live result.',
+    ] },
+  { cat: 'Code', title: 'Start / stop / restart a dev service (no rebuild)', where: 'Deploy page', access: 'docker',
+    steps: [
+      'Open <b class="text-brand-ink">Deploy</b>, find the service under "Development", click <b class="text-brand-ink">Start</b>/<b class="text-brand-ink">Stop</b>/<b class="text-brand-ink">Restart</b>.',
+    ] },
+  { cat: 'Git', title: 'Commit (and optionally push) code changes — makes them permanent', where: 'Git page', access: 'git',
+    steps: [
+      'Open <b class="text-brand-ink">Git</b> — the top of the page lists every uncommitted file.',
+      'Write a short commit message describing what changed.',
+      'Check "also push" if you want it sent to the remote repo immediately, then click <b class="text-brand-ink">Commit</b>.',
+    ] },
+  { cat: 'Git', title: 'Discard uncommitted code changes (undo)', where: 'Git page', access: 'git',
+    steps: [
+      'Open <b class="text-brand-ink">Git</b>, find the file (or use "discard all"), click <b class="text-brand-ink">Discard</b>.',
+      'This cannot be undone — the file reverts to its last commit.',
+    ] },
+  { cat: 'Admin — staging & release', title: 'Publish dev content + code to staging', where: 'Chat header — "Publish to staging" button', access: 'staging',
+    steps: [
+      'Open Chat — the button only enables when dev and staging actually differ.',
+      'Click <b class="text-brand-ink">Publish to staging</b> and confirm. Staging DB is backed up automatically first.',
+    ] },
+  { cat: 'Admin — staging & release', title: 'Roll staging back to the last backup', where: 'Chat header — "Rollback staging" button', access: 'staging',
+    steps: [
+      'Open Chat — the button only enables when a publish backup exists.',
+      'Click <b class="text-brand-ink">Rollback staging</b> and confirm.',
+    ] },
+  { cat: 'Admin — staging & release', title: 'Start / stop / restart / rebuild a staging service', where: 'Deploy page, "Staging" column', access: 'staging',
+    steps: [
+      'Open <b class="text-brand-ink">Deploy</b>, find the service under "Staging", click the action you need.',
+    ] },
+  { cat: 'Admin — system', title: 'Manage users and roles', where: 'Users page', access: 'user_management',
+    steps: [
+      'Open <b class="text-brand-ink">Users</b>, click "+ Add user" (or edit an existing one), set their role.',
+      'Roles and what each can do are listed on that page.',
+    ] },
+  { cat: 'Admin — system', title: "Change the AI provider or API key chat uses", where: 'Settings page', access: 'user_management',
+    steps: [
+      'Open <b class="text-brand-ink">Settings</b>, pick a provider, paste an API key, Save.',
+    ] },
+  { cat: 'Admin — system', title: 'Run a raw SQL statement directly on a database', where: 'Chat', access: 'sql',
+    steps: [
+      'Describe exactly what you want run — the assistant proposes a <b class="text-brand-ink">sql</b> card with the literal statement, nothing paraphrased.',
+      'Read it carefully, then click <b class="text-brand-ink">Run</b>. There is no undo for a destructive statement.',
+    ] },
+  { cat: 'Admin — system', title: 'Check host/container health, CPU, disk, and the full activity log', where: 'System page', access: 'docker',
+    steps: [
+      'Open <b class="text-brand-ink">System</b> — auto-refreshes every 10s. "Recent activity" at the bottom lists every proposed/executed action by everyone.',
+    ] },
+];
+
+function accessLabel(access) {
+  return { docker: 'Docker (dev)', staging: 'Docker (staging) — admin only', code_edit: 'code_edit', codegen_agent: 'codegen_agent',
+    content: 'Content', nav_link: 'Nav links', git: 'Git', sql: 'SQL', user_management: 'User management' }[access] || access;
 }
-function step(n, text) {
-  return `<div class="flex gap-3">
-    <span class="shrink-0 w-5 h-5 rounded-full bg-brand-panel2 border border-brand-border flex items-center justify-center text-[11px] font-bold text-brand-gold">${n}</span>
-    <div class="pt-0.5">${text}</div>
+
+function caseCard(me, c, delay) {
+  const allowed = c.access === 'staging' ? canRunDockerEnv(me, 'staging') : canRun(me, c.access);
+  return `<div class="bg-brand-panel border ${allowed ? 'border-brand-border' : 'border-brand-border/50'} rounded-xl p-5 shadow-panel animate-fade-in-up ${allowed ? '' : 'opacity-60'}" style="animation-delay:${delay}ms">
+    <div class="flex items-start justify-between gap-3 mb-1">
+      <h3 class="text-sm font-semibold ${allowed ? 'text-brand-ink' : 'text-brand-muted'}">${c.title}</h3>
+      <span class="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${allowed ? 'bg-brand-teal/15 text-brand-teal' : 'bg-brand-terracotta/15 text-brand-terracotta'}">${allowed ? 'available to you' : 'locked — ask an admin'}</span>
+    </div>
+    <div class="text-xs text-brand-muted mb-3">Where: <span class="text-brand-ink font-medium">${c.where}</span> &middot; Needs: <span class="font-mono">${accessLabel(c.access)}</span></div>
+    <ol class="space-y-2 text-sm ${allowed ? 'text-brand-muted' : 'text-brand-muted/70'} leading-relaxed">
+      ${c.steps.map((s, i) => `<li class="flex gap-2.5">
+        <span class="shrink-0 w-5 h-5 mt-0.5 rounded-full bg-brand-panel2 border border-brand-border flex items-center justify-center text-[11px] font-bold ${allowed ? 'text-brand-gold' : 'text-brand-muted'}">${i + 1}</span>
+        <span class="pt-0.5">${s}</span>
+      </li>`).join('')}
+    </ol>
   </div>`;
 }
 
@@ -39,59 +136,20 @@ async function init() {
   const me = await mountShell('/help');
   if (!me) return;
 
-  const canDeployDev = canRun(me, 'docker');
-  const canCode = canRun(me, 'code_edit') || canRun(me, 'codegen_agent');
-  const canGit = canRun(me, 'git');
-  const canStaging = canRunDockerEnv(me, 'staging');
-
+  const cats = [...new Set(CASES.map(c => c.cat))];
+  let delay = 0;
   document.getElementById('content').innerHTML = `
-    <div class="max-w-2xl">
-
-      ${section('The basic loop', `
-        <p>Everything works the same way everywhere in this app — Chat, Browse &amp; edit, Deploy: you describe what you want, AIwebmaster shows you a <b class="text-brand-ink">proposed action card</b> with a plain-English summary, and <b class="text-brand-ink">nothing happens until you click Run</b> on that card. You can always expand "Show details" on a card to see exactly what will run first.</p>
-      `, 0)}
-
-      ${section('Changing page text, images, or nav links', `
-        <p>Go to <b class="text-brand-ink">Browse &amp; edit</b>, find the page/post/nav link, and either edit the fields directly or click through to Chat with that item pre-loaded and just describe the change ("make this heading say X").</p>
-        <p>Content changes save as a <b class="text-brand-ink">draft</b> by default — say "publish it" if you want it live immediately, otherwise it won't affect the real site until published.</p>
-      `, 40)}
-
-      ${canCode ? section('Changing hardcoded text/styling in the code', `
-        <p>Some things (like the homepage hero heading) aren't in the CMS — they're written directly into the site's source code. You can still ask for these in Chat, e.g. <i>"make the homepage hero heading terracotta colored"</i>.</p>
-        <p>Two things can happen:</p>
-        ${step(1, `If the assistant already knows the exact current file content, it proposes a <b class="text-brand-ink">code_edit</b> card — a precise find-and-replace. Click Run.`)}
-        ${step(2, `If it needs to <i>find</i> the right file first (it can't read files itself), it proposes a <b class="text-brand-ink">codegen_agent</b> card instead — this hands the task to a real coding assistant that reads the code, makes the change, and shows you the diff. This can take a couple of minutes. Click Run, then review the diff.`)}
-        <p>Either way — if the assistant asks you to paste a code snippet, that just means it's choosing option 1 and needs the exact text to match against. You don't need to know which path it'll take; just describe the change.</p>
-      `, 80) : ''}
-
-      ${canCode && canDeployDev ? section('Making your change actually show up (dev)', `
-        <p>Editing the code doesn't automatically show it on the site — the dev site runs from a <b class="text-brand-ink">built container</b>, so it needs a rebuild to pick up your change.</p>
-        <p>After a successful code_edit/codegen_agent run, look for a <b class="text-brand-ink">"Rebuild &lt;service&gt; & Preview"</b> button right below the result — click it, wait (~1 minute), then click through to Preview (dev).</p>
-        <p>You can also do this manually from the <b class="text-brand-ink">Deploy</b> page — Start/Stop/Restart/Rebuild any dev service (cms/web/api) yourself. You'll only see controls for <b class="text-brand-ink">dev</b> there${canStaging ? '' : ' — staging is a separate environment your role can\'t touch, so those buttons are hidden'}.</p>
-      `, 120) : ''}
-
-      ${!canGit ? section('Important — your changes aren\'t saved to Git yet', `
-        <p>Your role can edit files and rebuild dev, but <b class="text-brand-ink">can't commit or push to Git</b>. That means your change is live on the dev site, but it's not yet permanently saved — if the code is rebuilt from a fresh checkout, or someone else's uncommitted work gets discarded, an uncommitted change of yours could be lost.</p>
-        <p>Once you're happy with a change, ask an admin (or a docker_ops/infra_admin/super_admin teammate) to commit it on the <b class="text-brand-ink">Git</b> page — that's what makes it permanent and reviewable in history.</p>
-      `, 160) : section('Saving your work permanently', `
-        <p>A code change only becomes permanent once it's committed. Go to the <b class="text-brand-ink">Git</b> page, write a short commit message describing what changed, and click Commit (check "also push" to send it to the remote repo).</p>
-      `, 160)}
-
-      ${section('What you can\'t do here', `
-        <ul class="list-disc pl-5 space-y-1">
-          ${canRun(me,'content') || canRun(me,'nav_link') ? '' : '<li>Edit page/post/nav content — ask an admin to grant this.</li>'}
-          ${canCode ? '' : '<li>Edit source code (code_edit / codegen_agent) — ask an admin to grant this.</li>'}
-          ${canDeployDev ? '' : '<li>Rebuild/restart dev services — ask an admin to grant this.</li>'}
-          <li>Publish to staging, roll staging back, or touch the staging environment at all — that's admin-only, on purpose.</li>
-          <li>Run raw SQL, manage users, or view/change AI provider settings — admin-only.</li>
-        </ul>
-      `, 200)}
-
-      ${section('If something goes wrong', `
-        <p>Every proposed and executed action — by anyone — is logged and visible on the <b class="text-brand-ink">System</b> page's "Recent activity" feed, and on Deploy's activity feed too. If a change didn't take effect, check there first: did it actually run, and did it succeed?</p>
-        <p>If a rebuild fails or a page looks broken, don't guess-and-retry — describe exactly what you see to the assistant in Chat and it can investigate (or hand off to codegen_agent to dig in).</p>
-      `, 240)}
-
+    <div class="max-w-3xl">
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up mb-6">
+        <div class="text-sm text-brand-ink font-semibold mb-1">The rule everywhere in this app</div>
+        <div class="text-sm text-brand-muted leading-relaxed">You describe what you want (or click a button), AIwebmaster shows a <b class="text-brand-ink">proposed action card</b> with a plain-English summary, and <b class="text-brand-ink">nothing happens until you click Run</b>. "Show details" on any card reveals exactly what will execute first.</div>
+      </div>
+      ${cats.map(cat => `
+        <div class="mb-2 mt-6 first:mt-0 px-1 text-[11px] font-bold uppercase tracking-wider text-brand-muted">${cat}</div>
+        <div class="grid grid-cols-1 gap-4">
+          ${CASES.filter(c => c.cat === cat).map(c => { const html = caseCard(me, c, delay); delay += 30; return html; }).join('')}
+        </div>
+      `).join('')}
     </div>`;
 }
 init();
