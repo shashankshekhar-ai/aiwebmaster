@@ -4,8 +4,25 @@
       <stop offset="0%" stop-color="#0d2c46"/>
       <stop offset="100%" stop-color="#0a2135"/>
     </linearGradient>
+    <clipPath id="globeClip">
+      <circle cx="15.5" cy="17" r="7.5"/>
+    </clipPath>
   </defs>
+
   <rect width="32" height="32" rx="8" fill="url(#g)"/>
-  <circle cx="24.5" cy="7.5" r="3" fill="#3fa39a"/>
-  <text x="14" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="19" fill="#f5b93f">W</text>
+
+  <!-- globe: the "web" in webmaster -->
+  <g clip-path="url(#globeClip)">
+    <circle cx="15.5" cy="17" r="7.5" fill="none" stroke="#f5b93f" stroke-width="1.4"/>
+    <ellipse cx="15.5" cy="17" rx="7.5" ry="3" fill="none" stroke="#f5b93f" stroke-width="1.1"/>
+    <ellipse cx="15.5" cy="17" rx="3" ry="7.5" fill="none" stroke="#f5b93f" stroke-width="1.1"/>
+    <line x1="8" y1="17" x2="23" y2="17" stroke="#f5b93f" stroke-width="1.1"/>
+  </g>
+  <circle cx="15.5" cy="17" r="7.5" fill="none" stroke="#f5b93f" stroke-width="1.4"/>
+
+  <!-- spark: the "AI" agent signal -->
+  <path
+    d="M25 5 L26.4 8.1 L29.5 9.5 L26.4 10.9 L25 14 L23.6 10.9 L20.5 9.5 L23.6 8.1 Z"
+    fill="#3fa39a"
+  />
 </svg>
