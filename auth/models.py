@@ -21,7 +21,14 @@ CREATE TABLE IF NOT EXISTS aiwebmaster_users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE aiwebmaster_users ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE aiwebmaster_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
 """
+
+# A user counts as "active" if they've logged in within this many days —
+# drives the Users-page active/inactive chart. Arbitrary but reasonable for
+# a single-operator-plus-a-few-editors tool; not meant to be a hard security
+# boundary (that's what role/session_epoch are for).
+_ACTIVE_WINDOW_DAYS = 30
 
 ROLES = {"docker_ops", "ui_editor", "infra_admin", "super_admin"}
 
@@ -86,11 +93,26 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def touch_last_login(user_id: int) -> None:
+    conn = psycopg2.connect(settings.api_database_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE aiwebmaster_users SET last_login_at = now() WHERE id = %s", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def list_users() -> list[dict[str, Any]]:
     conn = psycopg2.connect(settings.api_database_url)
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id, email, role, created_at FROM aiwebmaster_users ORDER BY created_at")
+            cur.execute(
+                """SELECT id, email, role, created_at, last_login_at,
+                          (last_login_at IS NOT NULL AND last_login_at > now() - interval '%s days') AS active
+                   FROM aiwebmaster_users ORDER BY created_at""",
+                (_ACTIVE_WINDOW_DAYS,),
+            )
             return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()

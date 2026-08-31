@@ -56,6 +56,11 @@ async function load() {
 
   const roleCounts = {};
   data.users.forEach(u => { roleCounts[u.role] = (roleCounts[u.role] || 0) + 1; });
+  const activeCount = data.users.filter(u => u.active).length;
+  const inactiveCount = data.users.length - activeCount;
+  const neverLoggedIn = data.users.filter(u => !u.last_login_at).length;
+
+  const STATUS_COLORS = { active: '#3fa39a', inactive: '#8ba3b6' };
 
   const rows = data.users.map((u, i) => `
     <tr class="border-b border-brand-border/60 hover:bg-brand-panel/60 transition-colors animate-fade-in" style="animation-delay:${i*30}ms">
@@ -68,18 +73,42 @@ async function load() {
       <td class="py-3 px-4"><span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full" style="background:${ROLE_COLORS[u.role]}22;color:${ROLE_COLORS[u.role]}">
         <span class="w-1.5 h-1.5 rounded-full" style="background:${ROLE_COLORS[u.role]}"></span>${u.role}
       </span></td>
+      <td class="py-3 px-4"><span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full" style="background:${STATUS_COLORS[u.active ? 'active' : 'inactive']}22;color:${STATUS_COLORS[u.active ? 'active' : 'inactive']}">
+        <span class="w-1.5 h-1.5 rounded-full" style="background:${STATUS_COLORS[u.active ? 'active' : 'inactive']}"></span>${u.active ? 'Active' : 'Inactive'}
+      </span></td>
+      <td class="py-3 px-4 text-xs text-brand-muted">${u.last_login_at ? u.last_login_at.slice(0,10) : 'Never'}</td>
       <td class="py-3 px-4 text-xs text-brand-muted">${u.created_at.slice(0,10)}</td>
     </tr>`).join('');
 
   const options = data.roles.map(r => `<option value="${r}">${r}</option>`).join('');
 
   content.innerHTML = `
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up">
+        <h2 class="text-sm font-semibold mb-1">Account status</h2>
+        <p class="text-[11px] text-brand-muted mb-3">Logged in within the last 30 days counts as active.</p>
+        <div class="flex items-center gap-4">
+          <canvas id="status-chart" height="140" class="max-w-[140px]"></canvas>
+          <div class="space-y-2 text-xs">
+            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full" style="background:${STATUS_COLORS.active}"></span><span class="font-medium">${activeCount}</span> active</div>
+            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full" style="background:${STATUS_COLORS.inactive}"></span><span class="font-medium">${inactiveCount}</span> inactive</div>
+            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-brand-muted"></span><span class="font-medium">${neverLoggedIn}</span> never logged in</div>
+            <div class="flex items-center gap-2 pt-1 border-t border-brand-border/60 mt-1"><span class="font-medium">${data.users.length}</span> total accounts</div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:40ms">
+        <h2 class="text-sm font-semibold mb-3">Role distribution</h2>
+        <canvas id="role-chart" height="140"></canvas>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="lg:col-span-2 space-y-4">
         <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up">
           <table class="w-full text-left">
             <thead><tr class="border-b border-brand-border text-[11px] uppercase tracking-wider text-brand-muted">
-              <th class="py-3 px-4 font-semibold">Email</th><th class="py-3 px-4 font-semibold">Role</th><th class="py-3 px-4 font-semibold">Created</th>
+              <th class="py-3 px-4 font-semibold">Email</th><th class="py-3 px-4 font-semibold">Role</th><th class="py-3 px-4 font-semibold">Status</th><th class="py-3 px-4 font-semibold">Last login</th><th class="py-3 px-4 font-semibold">Created</th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -90,18 +119,18 @@ async function load() {
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <input id="f-email" type="email" placeholder="Email" class="px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all" />
             <select id="f-role" class="px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all">${options}</select>
-            <input id="f-password" type="password" placeholder="Password (create or reset)" class="px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all" />
+            <div class="flex gap-1.5">
+              <input id="f-password" type="text" placeholder="Password (create or reset)" class="min-w-0 flex-1 px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all font-mono" />
+              <button id="f-generate" type="button" title="Generate a random password" class="shrink-0 px-3 py-2 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold">Generate</button>
+            </div>
           </div>
           <button id="f-submit" class="mt-3 px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-sm font-semibold transition-all hover:brightness-105 active:scale-[.98]">Save user</button>
           <div id="result" class="text-xs text-brand-muted mt-2"></div>
+          <div id="gen-hint" class="text-[11px] text-brand-muted mt-1"></div>
         </div>
       </div>
 
       <div class="space-y-4">
-        <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:40ms">
-          <h2 class="text-sm font-semibold mb-3">Role distribution</h2>
-          <canvas id="role-chart" height="180"></canvas>
-        </div>
         <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:120ms">
           <h2 class="text-sm font-semibold mb-3">What each role can do</h2>
           <div class="space-y-2.5">
@@ -113,6 +142,23 @@ async function load() {
         </div>
       </div>
     </div>`;
+
+  new Chart(document.getElementById('status-chart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Active', 'Inactive'],
+      datasets: [{
+        data: [activeCount, inactiveCount],
+        backgroundColor: [STATUS_COLORS.active, STATUS_COLORS.inactive],
+        borderColor: '#122f4a',
+        borderWidth: 3,
+      }],
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      cutout: '65%',
+    },
+  });
 
   new Chart(document.getElementById('role-chart'), {
     type: 'doughnut',
@@ -130,6 +176,20 @@ async function load() {
       cutout: '65%',
     },
   });
+
+  function genPassword(length = 14) {
+    // Alnum only, no ambiguous chars (0/O, 1/l/I) — easy to read back over a call/chat.
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const bytes = new Uint32Array(length);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => chars[b % chars.length]).join('');
+  }
+
+  document.getElementById('f-generate').onclick = () => {
+    const field = document.getElementById('f-password');
+    field.value = genPassword();
+    document.getElementById('gen-hint').textContent = 'Generated — copy it now, it won\'t be shown again after you save.';
+  };
 
   document.getElementById('f-submit').onclick = async () => {
     const email = document.getElementById('f-email').value;

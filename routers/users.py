@@ -18,4 +18,5 @@ def get_users(request: Request) -> dict:
     users = list_users()
     for u in users:
         u["created_at"] = str(u["created_at"])
+        u["last_login_at"] = str(u["last_login_at"]) if u["last_login_at"] else None
     return {"users": users, "roles": sorted(ROLES)}

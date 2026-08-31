@@ -11,7 +11,7 @@ from auth.auth0_oauth import (
     verify_state_token,
 )
 from auth.deps import require_session
-from auth.models import get_user_by_email
+from auth.models import get_user_by_email, touch_last_login
 from auth.passwords import verify_password
 from auth.rate_limit import check_locked, clear, record_failure
 from auth.sessions import COOKIE_NAME, create_session_token
@@ -64,6 +64,7 @@ def login(body: dict, response: Response) -> dict:
         record_failure(email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     clear(email)
+    touch_last_login(user["id"])
 
     _set_session_cookie(response, user)
     return {"email": user["email"], "role": user["role"]}
@@ -121,5 +122,6 @@ def auth0_callback(
 
     resp = RedirectResponse("/")
     resp.delete_cookie(_STATE_COOKIE, path="/api/auth/auth0")
+    touch_last_login(user["id"])
     _set_session_cookie(resp, user)
     return resp
