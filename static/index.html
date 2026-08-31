@@ -603,7 +603,16 @@ function addActions(actions) {
             line.className = `text-xs mb-1.5 ${res.ok ? 'text-emerald-400' : 'text-brand-terracotta'}`;
             line.textContent = (res.ok ? '✓ ' : '✗ ') + summary;
             resultWrap.appendChild(line);
-            addMsg('assistant', (res.ok ? '✓ ' : '✗ ') + summary);
+            const resultLine = (res.ok ? '✓ ' : '✗ ') + summary;
+            addMsg('assistant', resultLine);
+            // Also feed this into the model's own context (not just the visible
+            // log) — without it, a follow-up like "now edit that page" has no
+            // way to know the docId a create just produced, and re-proposes a
+            // CREATE instead of an UPDATE (confirmed live: a real 500 from a
+            // duplicate-slug collision). Keep it compact — id/slug only, not
+            // the full raw payload — so history doesn't bloat over a long chat.
+            const idBit = data && data.id !== undefined ? ` (id: ${data.id}${data.slug ? `, slug: ${data.slug}` : ''})` : '';
+            history.push({ role: 'assistant', content: resultLine + idBit });
           }
           const details = document.createElement('details');
           details.innerHTML = `<summary class="text-[11px] text-brand-muted cursor-pointer hover:text-brand-ink">Show raw output</summary>`;
