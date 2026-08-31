@@ -51,9 +51,8 @@ function skeleton() {
   </div><div class="h-64 rounded-xl bg-brand-panel border border-brand-border animate-pulse mt-6"></div>`;
 }
 
-function statusDot(ok) {
-  return `<span class="w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-brand-terracotta'} shrink-0"></span>`;
-}
+// fmtBytes, ageHours, timeAgoShort, freshnessDot, statusDot are shared —
+// see static/assets/sidebar.js.
 
 async function loadDiffBadge() {
   const el = document.getElementById('diff-badge');
@@ -86,14 +85,6 @@ async function loadDoctor() {
   }
 }
 
-function fmtBytes(n) {
-  if (!n) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let i = 0, v = n;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(1)} ${units[i]}`;
-}
-
 const TIER_BADGE = {
   dev: 'bg-brand-teal/15 text-brand-teal',
   staging: 'bg-brand-gold/15 text-brand-gold',
@@ -102,23 +93,6 @@ const TIER_BADGE = {
   other: 'bg-brand-panel2 text-brand-muted',
 };
 const TIER_LABEL = { dev: 'Development', staging: 'Staging', infra: 'Infrastructure', sandbox: 'Sandbox', other: 'Other' };
-
-function ageHours(iso) {
-  if (!iso) return Infinity;
-  return (Date.now() - new Date(iso)) / 3_600_000;
-}
-function freshnessDot(iso) {
-  const h = ageHours(iso);
-  const cls = h < 26 ? 'bg-emerald-400' : h < 48 ? 'bg-brand-gold' : 'bg-brand-terracotta';
-  return `<span class="w-1.5 h-1.5 rounded-full ${cls} shrink-0" title="${h === Infinity ? 'never' : Math.round(h) + 'h old'}"></span>`;
-}
-function timeAgoShort(iso) {
-  if (!iso) return 'never';
-  const h = ageHours(iso);
-  if (h < 1) return 'just now';
-  if (h < 24) return Math.round(h) + 'h ago';
-  return Math.round(h / 24) + 'd ago';
-}
 
 function backupRow(b) {
   return `<div class="grid grid-cols-[1fr_auto] gap-3 items-center py-2 border-b border-brand-border/40 last:border-0">

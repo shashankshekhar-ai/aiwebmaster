@@ -206,6 +206,50 @@ function dialogAlert(message) {
   return _showDialog({ message, confirmText: 'OK', cancelText: null });
 }
 
+// --- Shared formatting helpers ------------------------------------------
+// Generic display utilities, one source of truth for every page — do not
+// redefine these locally; import behavior by just using them (this file is
+// loaded everywhere via <script src="/assets/sidebar.js">).
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+function ageHours(iso) {
+  if (!iso) return Infinity;
+  return (Date.now() - new Date(iso)) / 3_600_000;
+}
+
+function timeAgoShort(iso) {
+  if (!iso) return 'never';
+  const h = ageHours(iso);
+  if (h < 1) return 'just now';
+  if (h < 24) return Math.round(h) + 'h ago';
+  return Math.round(h / 24) + 'd ago';
+}
+
+// A small colored dot for freshness/status — the shared alternative to a
+// filled badge/pill when the color is meaningful (age, health) rather than
+// decorative. thresholds in hours: < freshHours = green, < staleHours =
+// amber, otherwise (or no timestamp at all) = red.
+function freshnessDot(iso, freshHours, staleHours) {
+  freshHours = freshHours ?? 26;
+  staleHours = staleHours ?? 48;
+  const h = ageHours(iso);
+  const cls = h < freshHours ? 'bg-emerald-400' : h < staleHours ? 'bg-brand-gold' : 'bg-brand-terracotta';
+  return `<span class="w-1.5 h-1.5 rounded-full ${cls} shrink-0" title="${h === Infinity ? 'never' : Math.round(h) + 'h old'}"></span>`;
+}
+
+// Simple ok/not-ok dot — for booleans, not ages (e.g. a container running
+// or not), distinct from freshnessDot's time-based thresholds.
+function statusDot(ok) {
+  return `<span class="w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-brand-terracotta'} shrink-0"></span>`;
+}
+
 async function updateGitBadge() {
   const badge = document.getElementById('nav-git-badge');
   if (!badge) return;
