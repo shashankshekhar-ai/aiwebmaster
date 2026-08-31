@@ -76,7 +76,12 @@ def _check_databases() -> list[dict]:
             conn.close()
             checks.append(_check(label, True, "reachable"))
         except Exception as exc:
-            checks.append(_check(label, False, str(exc)[:200]))
+            # Never echo str(exc) verbatim — psycopg2/libpq error messages
+            # can embed the DSN itself (including the password) depending
+            # on the failure mode, and this check is visible to anyone with
+            # 'docker' permission, not just super_admin. Exception class
+            # name is enough signal for a health check.
+            checks.append(_check(label, False, f"connection failed ({type(exc).__name__})"))
     return checks
 
 

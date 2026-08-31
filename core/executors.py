@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,14 @@ def run_docker(payload: dict[str, Any]) -> dict[str, Any]:
         image_tag = payload.get("image_tag")
         if not image_tag or len(services) != 1:
             raise ExecutionError("rollback_to requires exactly one service and a non-empty 'image_tag'")
+        # image_tag is free text from the caller and ends up in a `docker
+        # tag <image>:<tag>` arg (list-form subprocess, so no shell
+        # injection risk) and in the aiwebmaster_deployments git_sha
+        # column — constrain it to what this app ever actually generates
+        # (a short hex git SHA) rather than trusting arbitrary text either
+        # place.
+        if not re.fullmatch(r"[0-9a-f]{7,40}", image_tag):
+            raise ExecutionError("image_tag must be a git SHA (hex, 7-40 chars) — pick one from the Rollback list, not free text")
         service = services[0]
         image = _image_ref(service)
         tag_step = _run_subprocess(["docker", "tag", f"{image}:{image_tag}", f"{image}:latest"], cwd=settings.repo_path, timeout=30)

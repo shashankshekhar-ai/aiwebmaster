@@ -101,7 +101,16 @@ def _dump_table_counts(path: Path) -> dict[str, int]:
     return counts
 
 
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
 def _live_table_counts(dsn: str, tables: list[str]) -> dict[str, int | None]:
+    # `tables` comes from parsing our own pg_dump output (_dump_table_counts)
+    # rather than raw HTTP input, but it still ends up inside a quoted SQL
+    # identifier below — defense in depth: reject anything that isn't a
+    # plain identifier before it ever reaches a query, since a crafted dump
+    # (if BACKUP_DIR were ever attacker-writable some other way) could embed
+    # a `"` to break out of the quoted identifier otherwise.
     counts: dict[str, int | None] = {}
     try:
         conn = psycopg2.connect(dsn, connect_timeout=5)
@@ -110,6 +119,9 @@ def _live_table_counts(dsn: str, tables: list[str]) -> dict[str, int | None]:
     try:
         with conn.cursor() as cur:
             for t in tables:
+                if not _SAFE_IDENTIFIER_RE.match(t):
+                    counts[t] = None
+                    continue
                 try:
                     cur.execute(f'SELECT count(*) FROM "{t}"')
                     counts[t] = cur.fetchone()[0]
