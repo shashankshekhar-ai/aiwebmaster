@@ -6,9 +6,7 @@
 <title>AIwebmaster — System</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="/assets/theme.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-</head>
+<script src="/assets/theme.js"></script></head>
 <body class="bg-gradient-to-b from-brand-navy to-brand-navy2 text-brand-ink font-sans antialiased relative">
 <div class="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_15%_0%,rgba(63,163,154,.08),transparent_40%),radial-gradient(circle_at_85%_100%,rgba(245,185,63,.06),transparent_40%)]"></div>
 <div id="app-root" class="relative z-10"></div>
@@ -31,7 +29,28 @@
 <script src="/assets/sidebar.js"></script>
 <script>
 let me = null;
-let cpuChart = null, diskChart = null;
+function cpuRowsHtml(topByCpu) {
+  if (!topByCpu.length) return `<div class="text-xs text-brand-muted">No container stats yet.</div>`;
+  const max = Math.max(...topByCpu.map(s => parsePercent(s.CPUPerc)), 1);
+  return topByCpu.map(s => {
+    const pct = parsePercent(s.CPUPerc);
+    return `<div class="flex items-center gap-3 text-xs">
+      <span class="w-32 shrink-0 truncate text-brand-muted" title="${s.Name}">${s.Name}</span>
+      <span class="flex-1">${hBarMark((pct / max) * 100, '#f5b93f')}</span>
+      <span class="w-12 shrink-0 text-right font-mono text-brand-ink">${s.CPUPerc || '0%'}</span>
+    </div>`;
+  }).join('');
+}
+
+function diskMeterHtml(diskPct) {
+  return `
+    <div class="flex items-baseline gap-2 mb-3">
+      <span class="text-2xl font-semibold text-brand-ink">${diskPct}%</span>
+      <span class="text-xs text-brand-muted">used</span>
+    </div>
+    ${meterMark(diskPct, { warnAt: 70, dangerAt: 85 })}
+    <div class="text-[11px] text-brand-muted mt-2">${diskPct >= 85 ? 'Getting full — worth a look.' : diskPct >= 70 ? 'Comfortable, but climbing.' : 'Plenty of headroom.'}</div>`;
+}
 
 function parsePercent(s) { return parseFloat((s || '0').replace('%', '')) || 0; }
 function parseMemMB(s) {
@@ -322,11 +341,11 @@ async function loadStats(first) {
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div class="lg:col-span-2 bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:120ms">
           <h2 class="text-sm font-semibold mb-3">Top containers by CPU</h2>
-          <canvas id="cpu-chart" height="140"></canvas>
+          <div id="cpu-rows" class="space-y-2.5"></div>
         </div>
         <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:160ms">
-          <h2 class="text-sm font-semibold mb-3">Disk usage</h2>
-          <canvas id="disk-chart" height="140"></canvas>
+          <h2 class="text-sm font-semibold mb-3">Disk usage (repo mount)</h2>
+          <div id="disk-meter"></div>
         </div>
       </div>
 
@@ -366,39 +385,14 @@ async function loadStats(first) {
       loadBackups();
       loadDiffBadge();
       document.getElementById('backup-now-btn').onclick = (e) => runBackupNow(e.target);
-
-    cpuChart = new Chart(document.getElementById('cpu-chart'), {
-      type: 'bar',
-      data: {
-        labels: topByCpu.map(s => s.Name),
-        datasets: [{ data: topByCpu.map(s => parsePercent(s.CPUPerc)), backgroundColor: '#f5b93f', borderRadius: 4, maxBarThickness: 22 }],
-      },
-      options: {
-        indexAxis: 'y',
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { ticks: { color: '#8ba3b6', font: { size: 10 } }, grid: { color: '#20415e' } },
-          y: { ticks: { color: '#8ba3b6', font: { size: 10 } }, grid: { display: false } },
-        },
-      },
-    });
-
-    diskChart = new Chart(document.getElementById('disk-chart'), {
-      type: 'doughnut',
-      data: { labels: ['Used', 'Free'], datasets: [{ data: [diskPct, 100 - diskPct], backgroundColor: [diskPct > 85 ? '#c9835a' : '#3fa39a', '#20415e'], borderColor: '#122f4a', borderWidth: 3 }] },
-      options: { plugins: { legend: { display: false } }, cutout: '72%' },
-    });
   } else {
     document.getElementById('stat-up').textContent = up;
     document.getElementById('stat-load').textContent = load.join(' / ');
     document.getElementById('stat-disk').textContent = diskPct + '%';
     document.getElementById('containers-tbody').innerHTML = rows;
-    cpuChart.data.labels = topByCpu.map(s => s.Name);
-    cpuChart.data.datasets[0].data = topByCpu.map(s => parsePercent(s.CPUPerc));
-    cpuChart.update();
-    diskChart.data.datasets[0].data = [diskPct, 100 - diskPct];
-    diskChart.update();
   }
+  document.getElementById('cpu-rows').innerHTML = cpuRowsHtml(topByCpu);
+  document.getElementById('disk-meter').innerHTML = diskMeterHtml(diskPct);
 }
 
 function activityTimeAgo(iso) {

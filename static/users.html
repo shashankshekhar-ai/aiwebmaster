@@ -6,9 +6,7 @@
 <title>AIwebmaster — Users</title>
 <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="/assets/theme.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-</head>
+<script src="/assets/theme.js"></script></head>
 <body class="bg-gradient-to-b from-brand-navy to-brand-navy2 text-brand-ink font-sans antialiased relative">
 <div class="pointer-events-none fixed inset-0 z-0 bg-[radial-gradient(circle_at_15%_0%,rgba(63,163,154,.08),transparent_40%),radial-gradient(circle_at_85%_100%,rgba(245,185,63,.06),transparent_40%)]"></div>
 <div id="app-root" class="relative z-10"></div>
@@ -23,10 +21,18 @@
 
 <script src="/assets/sidebar.js"></script>
 <script>
-const ROLE_COLORS = { docker_ops: '#3fa39a', ui_editor: '#f5b93f', infra_admin: '#c9835a', super_admin: '#ef4444' };
+// Validated for dark-mode categorical use (4 roles shown side by side as
+// bars/dots/badges) via the dataviz skill's validate_palette.js — the
+// original brand accents (teal/gold/terracotta) plus red for super_admin
+// failed lightness-band, chroma-floor, and CVD-separation checks when
+// placed adjacent to each other (red vs terracotta was near-indistinguishable
+// even with normal color vision, ΔE 12.8, floor is 15). These are
+// brand-adjacent replacements that pass all checks against the card
+// background (#122f4a) — see `git log -- static/users.html` for the search.
+const ROLE_COLORS = { docker_ops: '#30a689', ui_editor: '#b18225', infra_admin: '#ab402b', super_admin: '#6755be' };
 const ROLE_DESC = {
   docker_ops: 'docker, git',
-  ui_editor: 'content, nav_link',
+  ui_editor: 'content, nav_link, media',
   infra_admin: 'docker, git, sql, code_edit',
   super_admin: 'everything',
 };
@@ -87,19 +93,22 @@ async function load() {
       <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up">
         <h2 class="text-sm font-semibold mb-1">Account status</h2>
         <p class="text-[11px] text-brand-muted mb-3">Logged in within the last 30 days counts as active.</p>
-        <div class="flex items-center gap-4">
-          <canvas id="status-chart" height="140" class="max-w-[140px]"></canvas>
-          <div class="space-y-2 text-xs">
-            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full" style="background:${STATUS_COLORS.active}"></span><span class="font-medium">${activeCount}</span> active</div>
-            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full" style="background:${STATUS_COLORS.inactive}"></span><span class="font-medium">${inactiveCount}</span> inactive</div>
-            <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-brand-muted"></span><span class="font-medium">${neverLoggedIn}</span> never logged in</div>
-            <div class="flex items-center gap-2 pt-1 border-t border-brand-border/60 mt-1"><span class="font-medium">${data.users.length}</span> total accounts</div>
-          </div>
+        <div class="space-y-2 text-xs">
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full" style="background:${STATUS_COLORS.active}"></span><span class="font-medium">${activeCount}</span> active</div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full" style="background:${STATUS_COLORS.inactive}"></span><span class="font-medium">${inactiveCount}</span> inactive</div>
+          <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-brand-muted"></span><span class="font-medium">${neverLoggedIn}</span> never logged in</div>
+          <div class="flex items-center gap-2 pt-1 border-t border-brand-border/60 mt-1"><span class="font-medium">${data.users.length}</span> total accounts</div>
         </div>
       </div>
       <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:40ms">
         <h2 class="text-sm font-semibold mb-3">Role distribution</h2>
-        <canvas id="role-chart" height="140"></canvas>
+        <div class="space-y-2.5">
+          ${Object.entries(roleCounts).map(([role, count]) => `<div class="flex items-center gap-3 text-xs">
+            <span class="w-20 shrink-0 truncate text-brand-muted">${role}</span>
+            <span class="flex-1">${hBarMark((count / data.users.length) * 100, ROLE_COLORS[role])}</span>
+            <span class="w-4 shrink-0 text-right font-mono text-brand-ink">${count}</span>
+          </div>`).join('')}
+        </div>
       </div>
     </div>
 
@@ -142,40 +151,6 @@ async function load() {
         </div>
       </div>
     </div>`;
-
-  new Chart(document.getElementById('status-chart'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Active', 'Inactive'],
-      datasets: [{
-        data: [activeCount, inactiveCount],
-        backgroundColor: [STATUS_COLORS.active, STATUS_COLORS.inactive],
-        borderColor: '#122f4a',
-        borderWidth: 3,
-      }],
-    },
-    options: {
-      plugins: { legend: { display: false } },
-      cutout: '65%',
-    },
-  });
-
-  new Chart(document.getElementById('role-chart'), {
-    type: 'doughnut',
-    data: {
-      labels: Object.keys(roleCounts),
-      datasets: [{
-        data: Object.values(roleCounts),
-        backgroundColor: Object.keys(roleCounts).map(r => ROLE_COLORS[r]),
-        borderColor: '#122f4a',
-        borderWidth: 3,
-      }],
-    },
-    options: {
-      plugins: { legend: { position: 'bottom', labels: { color: '#8ba3b6', font: { size: 11 }, boxWidth: 8, padding: 12 } } },
-      cutout: '65%',
-    },
-  });
 
   function genPassword(length = 14) {
     // Alnum only, no ambiguous chars (0/O, 1/l/I) — easy to read back over a call/chat.

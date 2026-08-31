@@ -250,6 +250,30 @@ function statusDot(ok) {
   return `<span class="w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-brand-terracotta'} shrink-0"></span>`;
 }
 
+// --- Shared chart marks (see the dataviz skill this app follows) --------
+// Thin bar / column: <=24px thick, 4px rounded data-end, square at the
+// baseline, grows from a single baseline. Used for any "compare magnitude"
+// row (CPU by container, role counts, etc.) instead of a chart library.
+// pct: 0-100. colorCss: any valid CSS color value.
+function hBarMark(pct, colorCss, heightPx) {
+  const w = Math.max(0, Math.min(100, pct));
+  const h = heightPx || 8;
+  return `<div class="w-full bg-transparent" style="height:${h}px"><div style="height:${h}px;width:${w}%;min-width:2px;background:${colorCss};border-radius:0 4px 4px 0"></div></div>`;
+}
+
+// Meter / progress track: "a single ratio against a limit" — the fill
+// carries severity (accent -> warning -> danger via thresholds), the
+// unfilled track is a lighter step of the same neutral ramp. Never a pie
+// of 2 slices for this job (see dataviz skill, choosing-a-form.md).
+function meterMark(pct, opts) {
+  opts = opts || {};
+  const w = Math.max(0, Math.min(100, pct));
+  const warn = opts.warnAt ?? 70, danger = opts.dangerAt ?? 85;
+  const color = w >= danger ? 'var(--meter-danger, #c9835a)' : w >= warn ? 'var(--meter-warning, #f5b93f)' : (opts.okColor || 'var(--meter-ok, #3fa39a)');
+  const h = opts.heightPx || 10;
+  return `<div class="w-full rounded-full bg-brand-panel2 overflow-hidden" style="height:${h}px"><div style="height:${h}px;width:${w}%;background:${color};border-radius:9999px;transition:width .3s ease"></div></div>`;
+}
+
 async function updateGitBadge() {
   const badge = document.getElementById('nav-git-badge');
   if (!badge) return;
