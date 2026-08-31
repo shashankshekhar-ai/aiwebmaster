@@ -19,6 +19,9 @@ _KIND_TO_COLLECTION = {
     "resources": "resources",
     "case-studies": "case-studies",
     "navigation": "navigation",
+    "faqs": "faqs",
+    "testimonials": "testimonials",
+    "media": "media",
 }
 
 
@@ -31,6 +34,9 @@ def list_apps() -> dict:
             {"kind": "resources", "label": "Resources"},
             {"kind": "case-studies", "label": "Case Studies"},
             {"kind": "navigation", "label": "Navigation"},
+            {"kind": "faqs", "label": "FAQs"},
+            {"kind": "testimonials", "label": "Testimonials"},
+            {"kind": "media", "label": "Media"},
         ]
     }
 

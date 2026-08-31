@@ -15,17 +15,17 @@
 <div id="page-content" class="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
   <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
     <h1 class="text-sm font-semibold">Deploy</h1>
-    <p class="text-xs text-brand-muted mt-0.5">Start, stop, restart, or rebuild each service. Every action here executes immediately after you confirm.</p>
+    <p class="text-xs text-brand-muted mt-0.5">Start, stop, restart, rebuild, or roll back each service. Every action here executes immediately after you confirm.</p>
   </header>
   <div id="content" class="flex-1 overflow-y-auto p-6"></div>
 </div>
+<div id="rollback-modal-root" class="relative z-10"></div>
 
 <script src="/assets/sidebar.js"></script>
 <script>
 let me = null;
 
 const STATE_COLOR = { running: 'bg-emerald-400', exited: 'bg-brand-terracotta', absent: 'bg-brand-muted', restarting: 'bg-brand-gold' };
-const EVENT_COLOR = { executed: 'bg-brand-gold/15 text-brand-gold', proposed: 'bg-brand-teal/15 text-brand-teal' };
 
 function skeleton() {
   return `<div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl">
@@ -80,21 +80,6 @@ async function runDockerOp(env, service, op, btn) {
   await load(false);
 }
 
-async function loadActivity() {
-  const res = await fetch('/api/deploy/activity');
-  if (!res.ok) return '';
-  const { activity } = await res.json();
-  if (!activity.length) return `<div class="text-xs text-brand-muted py-2">No activity yet.</div>`;
-  return activity.map((a, i) => `<div class="flex items-start gap-3 py-2 border-b border-brand-border/60 last:border-0 animate-fade-in" style="animation-delay:${Math.min(i*15,300)}ms">
-      <span class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${EVENT_COLOR[a.event] || 'bg-brand-panel2 text-brand-muted'}">${a.event}</span>
-      <div class="min-w-0 flex-1">
-        <div class="text-xs"><span class="font-medium">${a.action_type}</span>${a.actor ? ` · ${a.actor}` : ''} ${a.ok === false ? '<span class="text-brand-terracotta">· failed</span>' : ''}</div>
-        <div class="text-[10px] text-brand-muted mt-0.5 font-mono truncate">${JSON.stringify(a.payload || {}).slice(0, 120).replace(/</g,'&lt;')}</div>
-      </div>
-      <div class="text-[10px] text-brand-muted shrink-0">${(a.created_at || '').slice(0, 16).replace('T', ' ')}</div>
-    </div>`).join('');
-}
-
 async function load(first) {
   const content = document.getElementById('content');
   if (first) content.innerHTML = skeleton();
@@ -107,18 +92,16 @@ async function load(first) {
     return;
   }
   const status = await statusRes.json();
-  const activityHtml = await loadActivity();
 
   content.innerHTML = `
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mb-6">
       ${serviceCard('dev', 'Development', status.dev)}
       ${serviceCard('staging', 'Staging', status.staging)}
     </div>
-    <div class="max-w-4xl bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel">
-      <h2 class="text-sm font-semibold mb-1">Recent activity</h2>
-      <p class="text-[11px] text-brand-muted mb-3">Every proposed and executed action across chat, browse, and this page.</p>
-      <div>${activityHtml}</div>
-    </div>`;
+    <a href="/system" class="max-w-4xl flex items-center justify-between bg-brand-panel border border-brand-border rounded-xl p-4 shadow-panel hover:border-brand-gold transition-all group">
+      <span class="text-xs text-brand-muted">Full audit log — every action across chat, browse, and this page</span>
+      <span class="text-xs text-brand-gold font-medium group-hover:underline">See on System page →</span>
+    </a>`;
 
   document.querySelectorAll('.svc-actions').forEach(el => {
     const env = el.dataset.env, service = el.dataset.service;
@@ -131,11 +114,65 @@ async function load(first) {
       actionBtn('Stop', 'stop', 'bg-brand-terracotta/15 text-brand-terracotta hover:bg-brand-terracotta/25'),
       actionBtn('Restart', 'restart', 'bg-brand-teal/15 text-brand-teal hover:bg-brand-teal/25'),
       actionBtn('Rebuild', 'rebuild', 'bg-brand-gold/15 text-brand-gold hover:bg-brand-gold/25'),
-    ].join('');
-    el.querySelectorAll('button').forEach(btn => {
+    ].join('') + `<button onclick="openRollbackModal('${env}', '${service}')" class="px-2 py-1 rounded-md text-[11px] font-medium bg-brand-panel2 text-brand-muted hover:text-brand-ink transition-all">Rollback…</button>`;
+    el.querySelectorAll('button[data-op]').forEach(btn => {
       btn.onclick = () => runDockerOp(env, service, btn.dataset.op, btn);
     });
   });
+}
+
+// --- Rollback: redeploy a specific past build (image tag = short git SHA)
+// without rebuilding. History comes from aiwebmaster_deployments — a row
+// per successful rebuild, recorded automatically (core/executors.py).
+async function openRollbackModal(env, service) {
+  const root = document.getElementById('rollback-modal-root');
+  root.innerHTML = `<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onclick="if(event.target===this) document.getElementById('rollback-modal-root').innerHTML=''">
+    <div class="w-full max-w-lg bg-brand-panel border border-brand-border rounded-2xl p-6 shadow-2xl">
+      <h3 class="text-sm font-semibold mb-1">Roll back ${service}</h3>
+      <p class="text-xs text-brand-muted mb-4">Redeploys a previous build exactly as it was — no rebuild, same image.</p>
+      <div id="rollback-body"><div class="text-xs text-brand-muted">Loading build history…</div></div>
+      <div class="flex justify-end gap-2.5 mt-5">
+        <button onclick="document.getElementById('rollback-modal-root').innerHTML=''" class="px-4 py-2 rounded-lg text-xs font-semibold text-brand-muted hover:text-brand-ink hover:bg-brand-panel2 transition-all">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+  try {
+    const r = await fetch(`/api/deploy/deployments?service=${encodeURIComponent(service)}&env=${encodeURIComponent(env)}`);
+    const d = await r.json();
+    const body = document.getElementById('rollback-body');
+    if (!d.deployments || !d.deployments.length) {
+      body.innerHTML = `<div class="text-xs text-brand-muted">No recorded builds yet for ${service} — this history starts filling in from the next Rebuild.</div>`;
+      return;
+    }
+    body.innerHTML = d.deployments.map((dep, i) => `
+      <div class="flex items-center justify-between py-2 border-b border-brand-border/40 last:border-0">
+        <div class="min-w-0">
+          <div class="text-xs font-mono text-brand-ink">${dep.image_tag}${i === 0 ? ' <span class="text-brand-muted">(current)</span>' : ''}</div>
+          <div class="text-[11px] text-brand-muted">${new Date(dep.created_at).toLocaleString()} · ${dep.kind}${dep.actor ? ' · ' + dep.actor : ''}</div>
+        </div>
+        ${i === 0 ? '' : `<button onclick="confirmRollback('${env}', '${service}', '${dep.image_tag}')" class="px-3 py-1.5 rounded-lg bg-brand-terracotta/15 text-brand-terracotta text-xs font-semibold transition-all hover:bg-brand-terracotta/25 shrink-0">Roll back to this</button>`}
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('rollback-body').innerHTML = `<div class="text-xs text-brand-terracotta">Could not load build history: ${String(e)}</div>`;
+  }
+}
+
+async function confirmRollback(env, service, imageTag) {
+  if (!(await dialogConfirm(`Redeploy ${service} using build ${imageTag}? This replaces what's currently running — it does NOT touch the database, only the code/container.`, { confirmText: 'Roll back', danger: true }))) return;
+  document.getElementById('rollback-modal-root').innerHTML = '';
+  try {
+    const res = await fetch('/api/actions/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'rollback-' + Date.now(), type: 'docker', payload: { services: [service], env, op: 'rollback_to', image_tag: imageTag } }),
+    });
+    const data = await res.json();
+    if (!res.ok) { await dialogAlert(data.detail?.error || JSON.stringify(data.detail) || 'Rollback failed'); }
+    else { await dialogAlert(`${service} rolled back to ${imageTag}.`); }
+  } catch (e) {
+    await dialogAlert(String(e));
+  }
+  await load(false);
 }
 
 (async () => {

@@ -78,7 +78,8 @@ async function loadSessionFromUrl() {
   messages.forEach(m => addMsg(m.role, m.content));
 }
 
-const KIND_TO_CONTENT_KIND = { pages: 'page', posts: 'post', resources: 'resource', 'case-studies': 'case-study', navigation: 'nav_link' };
+const KIND_TO_CONTENT_KIND = { pages: 'page', posts: 'post', resources: 'resource', 'case-studies': 'case-study', navigation: 'nav_link', faqs: 'faq', testimonials: 'testimonial' };
+const KIND_TITLE_FIELD = { pages: 'title', posts: 'title', resources: 'title', 'case-studies': 'title', faqs: 'question', testimonials: 'name' };
 let editContext = null;
 
 async function loadEditContext() {
@@ -117,16 +118,32 @@ async function loadEditContext() {
     const DRAFT_SUPPORTED = { pages: true, posts: true, 'case-studies': true };
     const historyNote = DRAFT_SUPPORTED[kind]
       ? ` I'll save changes as a draft by default (won't touch the live version) unless you say to publish — full version history is in the CMS admin: https://cms.thebradburygroup.com/admin/collections/${kind}/${id}.`
-      : '';
-    addMsg('assistant', `Editing "${doc.title || doc.label || id}" (${contentKind} #${id}). Current fields:\n${JSON.stringify(fields, null, 2)}\n\nTell me what to change.${historyNote}`);
+      : kind === 'faqs' || kind === 'testimonials'
+        ? ` This saves live as soon as you approve it — there's no draft state for ${contentKind}s.`
+        : '';
+    const titleField = KIND_TITLE_FIELD[kind] || 'title';
+    addMsg('assistant', `Editing "${doc[titleField] || doc.title || doc.label || id}" (${contentKind} #${id}). Current fields:\n${JSON.stringify(fields, null, 2)}\n\nTell me what to change.${historyNote}`);
   } catch (e) {
     addMsg('assistant', `Couldn't load ${kind} #${id}: ${e}`);
   }
 }
 
+// Matches the header subtitle to what this role can actually do — a
+// ui_editor never sees docker/sql action cards, so telling them upfront
+// "run SQL, redeploy services" is just confusing, not helpful.
+const HEADER_SUBTITLE_BY_ROLE = {
+  ui_editor: "Ask me to update pages, posts, and other content — I'll show you exactly what changes before anything goes live.",
+  docker_ops: 'Ask me to manage deployments — every action is shown before it runs.',
+  infra_admin: 'Ask me to edit code, run SQL, or manage deployments — every action is shown before it runs.',
+  super_admin: 'Ask me to edit content, redeploy services, run SQL, or manage the site — every action is shown before it runs.',
+};
+
 async function init() {
   me = await mountShell('/');
   if (!me) return;
+
+  const subtitleEl = document.querySelector('#page-content header p');
+  if (subtitleEl) subtitleEl.textContent = HEADER_SUBTITLE_BY_ROLE[me.role] || HEADER_SUBTITLE_BY_ROLE.ui_editor;
 
   // Public deployment: aiwebmaster is reached via webmaster.thebradburygroup.com
   // (behind Caddy, no port), so `${hostname}:3002`-style LAN links no longer
@@ -226,9 +243,46 @@ async function init() {
   send.disabled = false;
   await loadSessionFromUrl();
   await loadEditContext();
+  if (!currentSessionId && history.length === 0) showEmptyState();
   input.focus();
 }
 init();
+
+const EXAMPLE_PROMPTS_BY_ROLE = {
+  ui_editor: [
+    'Add a new blog post about our latest workshop',
+    'Update the homepage navigation to add a "Resources" link',
+    'Change the case study client name for the manufacturing example',
+  ],
+  docker_ops: ['Rebuild and restart the cms service on dev', 'Check if the API service is running'],
+  infra_admin: ['Show me recent git changes', 'Rebuild the web service after a code change'],
+  super_admin: [
+    'Add a new blog post about our latest workshop',
+    'Update the homepage navigation',
+    'Publish dev content to staging',
+  ],
+};
+
+function showEmptyState() {
+  if (log.children.length) return; // a message already arrived first — don't stomp it
+  const prompts = EXAMPLE_PROMPTS_BY_ROLE[me.role] || EXAMPLE_PROMPTS_BY_ROLE.ui_editor;
+  const wrap = document.createElement('div');
+  wrap.id = 'empty-state';
+  wrap.className = 'flex-1 flex flex-col items-center justify-center text-center px-6 animate-fade-in';
+  wrap.innerHTML = `
+    <div class="w-12 h-12 rounded-2xl bg-brand-gold/15 flex items-center justify-center mb-4">
+      <svg class="w-6 h-6 text-brand-gold" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z"/></svg>
+    </div>
+    <div class="text-sm font-semibold text-brand-ink mb-1.5">What would you like to do?</div>
+    <div class="text-xs text-brand-muted mb-6 max-w-sm">Describe it in plain language — try one of these, or type your own below.</div>
+    <div class="flex flex-col gap-2 w-full max-w-md">
+      ${prompts.map(p => `<button class="example-prompt-btn text-left px-3.5 py-2.5 rounded-lg bg-brand-panel border border-brand-border text-xs text-brand-ink transition-all hover:border-brand-gold hover:bg-brand-panel2">${p}</button>`).join('')}
+    </div>`;
+  log.appendChild(wrap);
+  wrap.querySelectorAll('.example-prompt-btn').forEach(btn => {
+    btn.onclick = () => { wrap.remove(); input.value = btn.textContent; input.focus(); };
+  });
+}
 
 function avatar(role) {
   if (role === 'user') {
@@ -381,12 +435,15 @@ function followUpEl(action, result) {
 function friendlySummary(a) {
   const p = a.payload || {};
   if (a.type === 'content') {
-    const kindLabel = { page: 'Page', post: 'Post/Insight', resource: 'Resource', 'case-study': 'Case Study' }[p.kind] || p.kind || 'content';
+    const kindLabel = { page: 'Page', post: 'Post/Insight', resource: 'Resource', 'case-study': 'Case Study', faq: 'FAQ', testimonial: 'Testimonial' }[p.kind] || p.kind || 'content';
     return `${p.docId ? 'Update' : 'Create'} ${kindLabel}${p.publish === false ? ' — saved as draft' : ''}`;
   }
   if (a.type === 'nav_link') {
     const verb = p.remove ? 'Remove' : 'Add/update';
     return `${verb} '${p.label || ''}' in the ${p.location || ''} nav`;
+  }
+  if (a.type === 'media') {
+    return `Upload image (${p.alt || 'no alt text'}) from ${p.url || '?'}`;
   }
   if (a.type === 'docker') {
     const services = (p.services || []).join(', ') || 'service';
@@ -456,6 +513,9 @@ function friendlyResultSummary(a, ok, data) {
         return `${what} — done, and confirmed visible at ${lc.path} on the live dev site.`;
       }
     }
+    if (a.type === 'media' && data.url) {
+      return `${what} — uploaded, id ${data.id}. Reference this id as the photo/image field in a follow-up content action.`;
+    }
     if (a.type === 'codegen_agent' && data.resumed) {
       return `${what} — done, continuing the same Claude Code conversation from earlier in this chat.`;
     }
@@ -471,6 +531,7 @@ function friendlyResultSummary(a, ok, data) {
 const ACTION_TYPE_COLOR = {
   content: 'gold',
   nav_link: 'gold',
+  media: 'gold',
   docker: 'teal',
   git: 'teal',
   publish: 'teal',
@@ -491,22 +552,26 @@ function addActions(actions) {
     row.style.animationDelay = `${i * 60}ms`;
 
     const accent = ACTION_TYPE_COLOR[a.type] || 'gold';
-    const borderClass = a.executable ? (permitted ? `border-brand-${accent}/50` : 'border-brand-border') : 'border-brand-border border-dashed';
-    const badgeClass = a.executable ? `bg-brand-${accent}/15 text-brand-${accent}` : 'bg-brand-panel2 text-brand-muted';
+    // Color carries real meaning here, not decoration: a left accent bar
+    // only on cards you can actually act on right now (needs your
+    // attention), a plain hairline border otherwise. The type name is a
+    // small dot + muted label — not a filled pill — so it doesn't compete
+    // with the actual sentence describing what's about to happen.
+    const borderClass = a.executable && permitted ? `border-brand-border border-l-2 border-l-brand-${accent}` : 'border-brand-border';
+    const dashedClass = a.executable ? '' : 'border-dashed';
     const summary = friendlySummary(a);
     const payloadHtml = `<pre class="text-[11px] bg-brand-navy2 rounded-lg p-3 overflow-auto max-h-56 text-brand-muted">${JSON.stringify(a.payload, null, 2)}</pre>`;
 
     row.innerHTML = `
       <div class="w-8 h-8 shrink-0"></div>
-      <div class="flex-1 bg-brand-panel border ${borderClass} rounded-xl p-4 min-w-0">
-        <div class="flex items-center gap-2 mb-2 flex-wrap">
-          <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${badgeClass}">${a.type}${a.executable ? '' : ' · draft only'}</span>
+      <div class="flex-1 bg-brand-panel border ${borderClass} ${dashedClass} rounded-xl p-4 min-w-0">
+        <div class="flex items-center gap-1.5 mb-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-brand-${accent} shrink-0"></span>
+          <span class="text-[11px] font-medium uppercase tracking-wide text-brand-muted">${a.type}${a.executable ? '' : ' · draft only, run it yourself'}</span>
         </div>
-        <div class="text-sm mb-2">${a.description.replace(/</g,'&lt;')}</div>
-        ${summary
-          ? `<div class="text-sm font-medium text-brand-ink mb-1">${summary.replace(/</g,'&lt;')}</div>
-             <details class="mb-2"><summary class="text-[11px] text-brand-muted cursor-pointer hover:text-brand-ink">Show details</summary>${payloadHtml}</details>`
-          : payloadHtml}
+        ${summary ? `<div class="text-sm font-semibold text-brand-ink mb-1">${summary.replace(/</g,'&lt;')}</div>` : ''}
+        <div class="text-sm text-brand-muted mb-2">${a.description.replace(/</g,'&lt;')}</div>
+        ${summary ? `<details class="mb-2"><summary class="text-[11px] text-brand-muted cursor-pointer hover:text-brand-ink">Show technical details</summary>${payloadHtml}</details>` : payloadHtml}
         <div class="action-footer mt-2"></div>
       </div>`;
 
@@ -585,6 +650,7 @@ function removeTyping() { document.getElementById('typing-indicator')?.remove();
 
 async function submit() {
   if (!input.value.trim()) return;
+  document.getElementById('empty-state')?.remove();
   const text = input.value.trim();
   input.value = '';
   addMsg('user', text);

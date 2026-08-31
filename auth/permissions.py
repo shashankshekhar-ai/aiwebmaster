@@ -7,9 +7,9 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     # codegen_agent/docker deliberately excluded: those spend the operator's
     # own logged-in Claude subscription quota / touch running containers,
     # which is a materially different risk tier than editing content.
-    "ui_editor": {"content", "nav_link", "code_edit"},
+    "ui_editor": {"content", "nav_link", "media", "code_edit"},
     "infra_admin": {"docker", "git", "sql", "code_edit", "codegen_agent"},
-    "super_admin": {"docker", "git", "sql", "content", "nav_link", "user_management", "publish", "rollback", "code_edit", "codegen_agent"},
+    "super_admin": {"docker", "git", "sql", "content", "nav_link", "media", "user_management", "publish", "rollback", "code_edit", "codegen_agent"},
 }
 
 # Roles allowed to target env:"staging" on a docker action. Everyone else

@@ -22,7 +22,7 @@ from auth.permissions import ROLE_PERMISSIONS
 from core.ai_provider import AIProviderError, structured_call
 from core.context import build_site_context
 
-EXECUTABLE_TYPES = {"content", "nav_link", "git", "docker", "sql", "user_management", "publish", "rollback", "code_edit", "codegen_agent"}
+EXECUTABLE_TYPES = {"content", "nav_link", "media", "git", "docker", "sql", "user_management", "publish", "rollback", "code_edit", "codegen_agent"}
 DRAFT_ONLY_TYPES = {"nginx", "system"}
 ALL_TYPES = EXECUTABLE_TYPES | DRAFT_ONLY_TYPES
 
@@ -37,7 +37,7 @@ ALL_TYPES = EXECUTABLE_TYPES | DRAFT_ONLY_TYPES
 CHAT_PROPOSABLE_TYPES = EXECUTABLE_TYPES - {"user_management"}
 
 ActionType = Literal[
-    "content", "nav_link", "git", "docker", "sql", "user_management", "publish", "rollback", "code_edit", "codegen_agent", "nginx", "system"
+    "content", "nav_link", "media", "git", "docker", "sql", "user_management", "publish", "rollback", "code_edit", "codegen_agent", "nginx", "system"
 ]
 
 
@@ -53,8 +53,9 @@ each action individually.
 Action types you can propose:
 - content: create/update a Page, Post/Insight, Resource, or Case Study. payload: {kind: "page"|"post"|"resource"|"case-study", docId?: string, fields: {...}, publish?: boolean}. `publish` defaults to true (matches prior behavior); set false to save a new draft version without touching the live/published document — Pages, Posts, and Case Studies all support this (Resources doesn't; the flag is a no-op there). Prefer publish:false unless the user clearly wants it live immediately.
 - nav_link: add/update, remove, or reorder a header or footer navigation entry. Add/update payload: {label, href, location: "header"|"footer", footerGroup?, order?, enabled?, openInNewTab?}. Remove payload: {label, location, remove: true} (href not needed). Reorder: same as add/update but only `order` actually needs to change — propose one nav_link action per link being reordered, each with its new `order` value.
+- media: upload an image into the CMS media library, from a URL the user pasted or referenced (there is no file-attach button in this chat — if the user wants to upload something from their own device, tell them there's no way to do that here yet). payload: {url: string, alt: string, caption?: string}. `alt` is required (accessibility + Payload's own field requirement) — if the user didn't give one, write a short factual one yourself rather than asking, unless the image content is genuinely ambiguous. Returns the new media doc's id — use that id as the value for an upload-type field (e.g. a testimonial's `photo`) in a follow-up content action.
 - git: stage/commit/push, or discard uncommitted changes. payload for commit (default op): {message: string, push: boolean}. payload for discard: {op: "discard", files?: string[]} — restores tracked files to their last-committed state; omit `files` to discard everything, or list specific paths. Never touches untracked new files (a code_edit "write" that hasn't been committed yet) — those need deleting by hand if unwanted.
-- docker: control one or more compose services. payload: {services: string[], env?: "dev"|"staging", op?: "rebuild"|"start"|"stop"|"restart"}. `env` defaults to "dev" (services: cms/web/api; staging uses cms-prod/web-prod/api-prod). `op` defaults to "rebuild" (build then force-recreate — use this for "redeploy" after a code change); "start"/"stop"/"restart" just control the running container, no rebuild. Some roles (e.g. ui_editor) can only run docker actions against dev — if unsure whether this user can reach staging, default to env:"dev" rather than proposing a staging action that will just 403.
+- docker: control one or more compose services. payload: {services: string[], env?: "dev"|"staging", op?: "rebuild"|"start"|"stop"|"restart"|"rollback_to"}. `env` defaults to "dev" (services: cms/web/api; staging uses cms-prod/web-prod/api-prod). `op` defaults to "rebuild" (build then force-recreate — use this for "redeploy" after a code change); "start"/"stop"/"restart" just control the running container, no rebuild. "rollback_to" redeploys a SPECIFIC PAST build without rebuilding — payload also needs {image_tag: string} (a short git SHA — the user must name one, or say "the previous build"/"before my last change"; you have no way to list them yourself, point them at the Deploy page's Rollback picker if they don't already know which SHA). rollback_to also requires exactly one service in the list. Some roles (e.g. ui_editor) can only run docker actions against dev — if unsure whether this user can reach staging, default to env:"dev" rather than proposing a staging action that will just 403.
 - sql: run a raw SQL statement against the cms or api database. payload: {database: "cms"|"api", statement: string}
 - user_management: NEVER propose this action type, for any user, ever — creating/editing AIwebmaster accounts is human-only, done via the Users page's own form. If asked to create or change a user, reply that you can't do that here and point them to the Users page.
 - publish: promote the dev stack's CMS content + current code to the staging stack (a second local environment for review before anything is considered final; only super_admin can run this). A backup of the current staging DB is always taken first. payload: {target: "prod"}

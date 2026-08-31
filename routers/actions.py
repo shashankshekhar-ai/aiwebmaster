@@ -27,6 +27,8 @@ def run_action(body: dict, request: Request) -> dict:
     if action_type == "codegen_agent" and chat_session_id:
         payload["_chat_session_id"] = chat_session_id
         payload["_user_id"] = request.state.user["id"]
+    if action_type == "docker":
+        payload["_actor"] = request.state.user["email"]
 
     if not action_id or not action_type:
         raise HTTPException(status_code=400, detail="id and type are required")

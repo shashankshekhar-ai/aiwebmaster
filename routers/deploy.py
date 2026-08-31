@@ -20,6 +20,7 @@ from core.executors import _backups_sorted
 from core.repo_state import db_content_hash, git_state
 from db.audit import list_recent
 from db.deploy_state import get_last_publish
+from db.deployments import list_deployments
 
 router = APIRouter(dependencies=[Depends(require_session)])
 
@@ -97,6 +98,21 @@ def deploy_diff(request: Request) -> dict:
         "has_backup": bool(_backups_sorted()),
         "last_publish_at": str(last["last_publish_at"]) if last and last.get("last_publish_at") else None,
     }
+
+
+@router.get("/deploy/deployments")
+def deploy_deployments(request: Request, service: str, env: str) -> dict:
+    """Build history for one service — powers the "roll back to a previous
+    build" picker. Each row is a real image tag still on disk (until
+    pruned beyond _KEEP_IMAGE_TAGS — core/executors.py), so any of these
+    can actually be redeployed, not just referenced."""
+    _require_docker_view(request)
+    if service not in {*DEV_SERVICES, *STAGING_SERVICES}:
+        raise HTTPException(status_code=400, detail=f"Unknown service '{service}'")
+    rows = list_deployments(service=service, env=env, limit=15)
+    for r in rows:
+        r["created_at"] = str(r["created_at"])
+    return {"deployments": rows}
 
 
 @router.get("/deploy/activity")

@@ -374,9 +374,9 @@ async function mountAgentMenu(activePath) {
 
 const ROLE_PERMISSIONS = {
   docker_ops: ['docker', 'git'],
-  ui_editor: ['content', 'nav_link', 'code_edit'],
+  ui_editor: ['content', 'nav_link', 'media', 'code_edit'],
   infra_admin: ['docker', 'git', 'sql', 'code_edit', 'codegen_agent'],
-  super_admin: ['docker', 'git', 'sql', 'content', 'nav_link', 'user_management', 'publish', 'rollback', 'code_edit', 'codegen_agent'],
+  super_admin: ['docker', 'git', 'sql', 'content', 'nav_link', 'media', 'user_management', 'publish', 'rollback', 'code_edit', 'codegen_agent'],
 };
 // Mirrors auth/permissions.py's DOCKER_STAGING_ROLES — everyone else with
 // 'docker' permission (currently just ui_editor) is dev-only; the server

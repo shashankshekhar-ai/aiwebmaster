@@ -11,7 +11,13 @@ Chat (or Browse picker) → agent proposes typed **actions** → human clicks
 **Run** on each one individually → executor runs it → logged to an
 append-only audit trail. Nothing executes without an explicit click, ever.
 
-Action types: `content` (Pages/Posts/Resources/Case Studies, draft-by-default),
+Action types: `content` (Pages/Posts/Resources/Case Studies/FAQs/Testimonials,
+draft-by-default where the collection supports drafts — FAQs and
+Testimonials have no draft state, they save live; neither has a slug or a
+public detail page), `media` (uploads an image from a URL into the CMS
+media library — no chat file-attach UI exists, so this is URL-fetch only;
+returns a media doc id, use it as the value of an upload-type field like a
+testimonial's `photo` in a follow-up `content` action),
 `nav_link` (add/update/remove/reorder header+footer nav), `git` (commit/push,
 or discard uncommitted changes), `docker` (start/stop/restart/rebuild, dev or
 staging), `sql`, `code_edit` (mechanical old_string/new_string file edit),

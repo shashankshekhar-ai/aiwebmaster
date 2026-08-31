@@ -32,7 +32,19 @@ const ICON = {
   resources: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
   'case-studies': 'M9 19v-6a2 2 0 012-2h2a2 2 0 012 2v6m-6 0h6m-6 0H5a2 2 0 01-2-2V7a2 2 0 012-2h2m10 14h2a2 2 0 002-2V7a2 2 0 00-2-2h-2m-6 0V3m6 2V3',
   navigation: 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7',
+  faqs: 'M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  testimonials: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z',
+  media: 'M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M4 8h.01M4 4h16a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1z',
 };
+
+// The CMS field that identifies a doc — post/resource/case-study/page/nav
+// use title/label, but faqs/testimonials don't have either.
+const TITLE_FIELD = { faqs: 'question', testimonials: 'name' };
+
+// Neither of these currently renders anywhere on the live site (FAQs: no
+// page at all; Testimonials: /about uses a hardcoded array, not the CMS) —
+// flagged so an editor doesn't spend time on content that goes nowhere yet.
+const NOT_LIVE_YET = new Set(['faqs', 'testimonials']);
 
 function icon(d, extra) {
   return `<svg class="w-5 h-5 ${extra||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
@@ -96,6 +108,32 @@ function openInChat(kind, docId) {
   window.location.href = `/?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(docId)}`;
 }
 
+function mediaGrid(docs) {
+  return `<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+    ${docs.length === 0 ? `<div class="col-span-full text-xs text-brand-muted py-6 text-center">Nothing uploaded yet — the \`media\` chat action (paste an image URL) adds files here.</div>` : ''}
+    ${docs.map((d, i) => `<div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up" style="animation-delay:${(i+1)*30}ms">
+      <div class="aspect-video bg-brand-navy2 flex items-center justify-center overflow-hidden">
+        ${d.url ? `<img src="${d.url}" alt="${(d.alt || '').replace(/"/g, '&quot;')}" class="w-full h-full object-cover" loading="lazy" />` : `<span class="text-brand-muted text-xs">No preview</span>`}
+      </div>
+      <div class="p-3">
+        <div class="text-xs truncate" title="${(d.alt || '').replace(/"/g, '&quot;')}">${(d.alt || '(no alt text)').replace(/</g, '&lt;')}</div>
+        <button onclick="copyMediaId('${d.id}', this)" class="mt-2 w-full px-2 py-1.5 rounded-md text-[11px] font-medium bg-brand-panel2 border border-brand-border transition-all hover:border-brand-gold">Copy ID</button>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+async function copyMediaId(id, btn) {
+  try {
+    await navigator.clipboard.writeText(id);
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch (e) {
+    await dialogAlert('Could not copy — here is the id: ' + id);
+  }
+}
+
 async function goList(kind) {
   state = { level: 'list', kind };
   renderCrumbs();
@@ -106,7 +144,16 @@ async function goList(kind) {
     const docs = data.docs || [];
     if (kind === 'navigation') docs.sort((a, b) => (a.location || '').localeCompare(b.location || '') || (a.order || 0) - (b.order || 0));
 
-    view.innerHTML = `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+    if (kind === 'media') {
+      view.innerHTML = mediaGrid(docs);
+      return;
+    }
+
+    const notLiveBanner = NOT_LIVE_YET.has(kind)
+      ? `<div class="mb-4 px-4 py-2.5 rounded-lg bg-brand-gold/10 border border-brand-gold/30 text-xs text-brand-gold">Not shown on the live site yet — this content is manageable but has no frontend to render it.</div>`
+      : '';
+
+    view.innerHTML = notLiveBanner + `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
       <div onclick="openInChat('${kind}', 'new')"
         class="cursor-pointer border-2 border-dashed border-brand-border rounded-xl p-5 flex items-center justify-center text-brand-gold text-sm font-medium transition-all hover:border-brand-gold hover:bg-brand-panel/50 animate-fade-in-up">
         ＋ New ${kind}
@@ -119,7 +166,7 @@ async function goList(kind) {
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>` : ''}
         <div onclick="openInChat('${kind}', '${d.id}')" class="cursor-pointer">
-          <div class="font-semibold text-sm truncate group-hover:text-brand-gold transition-colors pr-6">${(d.title || d.label || 'Untitled').replace(/</g, '&lt;')}</div>
+          <div class="font-semibold text-sm truncate group-hover:text-brand-gold transition-colors pr-6">${(d[TITLE_FIELD[kind]] || d.title || d.label || 'Untitled').replace(/</g, '&lt;')}</div>
           <div class="text-xs text-brand-muted mt-1 truncate font-mono">${(d.slug || d.href || '').replace(/</g, '&lt;')}</div>
           ${kind === 'navigation' ? `<div class="text-[10px] text-brand-muted mt-2 uppercase tracking-wider">${d.location} · order ${d.order ?? 0}</div>` : ''}
         </div>

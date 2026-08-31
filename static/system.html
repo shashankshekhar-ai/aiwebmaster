@@ -19,10 +19,14 @@
       <h1 class="text-sm font-semibold">System</h1>
       <p class="text-xs text-brand-muted mt-0.5">Live docker &amp; host status.</p>
     </div>
-    <div id="refresh-note" class="text-[11px] text-brand-muted flex items-center gap-1.5"></div>
+    <div class="flex items-center gap-4">
+      <div id="diff-badge"></div>
+      <div id="refresh-note" class="text-[11px] text-brand-muted flex items-center gap-1.5"></div>
+    </div>
   </header>
   <div id="content" class="flex-1 overflow-y-auto p-6"></div>
 </div>
+<div id="restore-modal-root" class="relative z-10"></div>
 
 <script src="/assets/sidebar.js"></script>
 <script>
@@ -45,6 +49,233 @@ function skeleton() {
   return `<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     ${Array(3).fill(0).map(() => '<div class="h-24 rounded-xl bg-brand-panel border border-brand-border animate-pulse"></div>').join('')}
   </div><div class="h-64 rounded-xl bg-brand-panel border border-brand-border animate-pulse mt-6"></div>`;
+}
+
+function statusDot(ok) {
+  return `<span class="w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-400' : 'bg-brand-terracotta'} shrink-0"></span>`;
+}
+
+async function loadDiffBadge() {
+  const el = document.getElementById('diff-badge');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/deploy/diff');
+    if (!r.ok) { el.innerHTML = ''; return; }
+    const d = await r.json();
+    el.innerHTML = d.content_changed
+      ? `<span class="inline-flex items-center gap-1.5 text-[11px] text-brand-gold"><span class="w-1.5 h-1.5 rounded-full bg-brand-gold"></span>Dev and staging content differ</span>`
+      : `<span class="inline-flex items-center gap-1.5 text-[11px] text-brand-muted"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Dev and staging content in sync</span>`;
+  } catch (e) { el.innerHTML = ''; }
+}
+
+async function loadDoctor() {
+  const el = document.getElementById('doctor-body');
+  if (!el) return;
+  el.innerHTML = `<div class="text-xs text-brand-muted">Checking…</div>`;
+  try {
+    const r = await fetch('/api/doctor/check');
+    if (r.status === 403) { el.innerHTML = `<div class="text-xs text-brand-muted">Needs docker access to view.</div>`; return; }
+    const d = await r.json();
+    el.innerHTML = d.checks.map(c => `<div class="flex items-start gap-2 text-xs py-1">
+      ${statusDot(c.ok)}
+      <span class="font-medium shrink-0">${c.name}:</span>
+      <span class="text-brand-muted truncate">${(c.detail || '').replace(/</g, '&lt;')}</span>
+    </div>`).join('');
+  } catch (e) {
+    el.innerHTML = `<div class="text-xs text-brand-muted">Could not run checks: ${String(e)}</div>`;
+  }
+}
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+const TIER_BADGE = {
+  dev: 'bg-brand-teal/15 text-brand-teal',
+  staging: 'bg-brand-gold/15 text-brand-gold',
+  infra: 'bg-blue-400/15 text-blue-300',
+  sandbox: 'bg-purple-400/15 text-purple-300',
+  other: 'bg-brand-panel2 text-brand-muted',
+};
+const TIER_LABEL = { dev: 'Development', staging: 'Staging', infra: 'Infrastructure', sandbox: 'Sandbox', other: 'Other' };
+
+function ageHours(iso) {
+  if (!iso) return Infinity;
+  return (Date.now() - new Date(iso)) / 3_600_000;
+}
+function freshnessDot(iso) {
+  const h = ageHours(iso);
+  const cls = h < 26 ? 'bg-emerald-400' : h < 48 ? 'bg-brand-gold' : 'bg-brand-terracotta';
+  return `<span class="w-1.5 h-1.5 rounded-full ${cls} shrink-0" title="${h === Infinity ? 'never' : Math.round(h) + 'h old'}"></span>`;
+}
+function timeAgoShort(iso) {
+  if (!iso) return 'never';
+  const h = ageHours(iso);
+  if (h < 1) return 'just now';
+  if (h < 24) return Math.round(h) + 'h ago';
+  return Math.round(h / 24) + 'd ago';
+}
+
+function backupRow(b) {
+  return `<div class="grid grid-cols-[1fr_auto] gap-3 items-center py-2 border-b border-brand-border/40 last:border-0">
+    <div class="min-w-0">
+      <div class="text-sm font-medium text-brand-ink">${b.label}</div>
+      <div class="text-[11px] text-brand-muted truncate" title="${(b.description || '').replace(/"/g, '&quot;')}">${b.description || ''}</div>
+    </div>
+    <div class="flex flex-col items-end gap-1 shrink-0">
+      <div class="flex items-center gap-1.5 text-[11px]">
+        ${freshnessDot(b.modified_at)}
+        <span class="text-brand-muted">local: ${b.modified_at ? timeAgoShort(b.modified_at) + ' · ' + fmtBytes(b.size_bytes) : 'none'}</span>
+      </div>
+      <div class="flex items-center gap-1.5 text-[11px]">
+        ${freshnessDot(b.offhost_synced_at)}
+        <span class="text-brand-muted">off-host: ${timeAgoShort(b.offhost_synced_at)}</span>
+      </div>
+      ${me && me.role === 'super_admin' && b.modified_at ? `<button onclick="openRestoreModal('${b.database}')" class="text-[11px] text-brand-terracotta hover:underline mt-0.5">Restore…</button>` : ''}
+    </div>
+  </div>`;
+}
+
+async function loadBackups() {
+  const el = document.getElementById('backups-body');
+  if (!el) return;
+  el.innerHTML = `<div class="text-xs text-brand-muted">Loading…</div>`;
+  try {
+    const r = await fetch('/api/backups/status');
+    if (r.status === 403) { el.innerHTML = `<div class="text-xs text-brand-muted">Needs sql access to view.</div>`; return; }
+    const d = await r.json();
+    const dev = d.backups.filter(b => b.tier === 'dev');
+    const staging = d.backups.filter(b => b.tier === 'staging');
+    el.innerHTML = `
+      <div class="mb-1"><span class="text-[10px] font-bold uppercase tracking-wider ${TIER_BADGE.dev} px-1.5 py-0.5 rounded-full">${TIER_LABEL.dev}</span></div>
+      ${dev.map(backupRow).join('')}
+      <div class="mb-1 mt-3"><span class="text-[10px] font-bold uppercase tracking-wider ${TIER_BADGE.staging} px-1.5 py-0.5 rounded-full">${TIER_LABEL.staging}</span></div>
+      ${staging.map(backupRow).join('')}`;
+  } catch (e) {
+    el.innerHTML = `<div class="text-xs text-brand-muted">Could not load: ${String(e)}</div>`;
+  }
+}
+
+// --- Restore modal: pick a backup -> preview per-table row-count diff ->
+// type the db name to confirm -> final danger confirm -> restore. Local
+// backups only (see routers/backups.py's own note on why off-host copies
+// are never restorable through this UI at all).
+let _restoreState = null;
+
+function closeRestoreModal() {
+  document.getElementById('restore-modal-root').innerHTML = '';
+  _restoreState = null;
+}
+
+async function openRestoreModal(database) {
+  _restoreState = { database, file: null };
+  const root = document.getElementById('restore-modal-root');
+  root.innerHTML = `<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onclick="if(event.target===this) closeRestoreModal()">
+    <div class="w-full max-w-lg bg-brand-panel border border-brand-border rounded-2xl p-6 shadow-2xl">
+      <h3 class="text-sm font-semibold mb-1">Restore ${database}</h3>
+      <p class="text-xs text-brand-muted mb-4">Local backups only. This overwrites the live database — nothing runs until you confirm at the end.</p>
+      <div id="restore-body"><div class="text-xs text-brand-muted">Loading available backups…</div></div>
+      <div class="flex justify-end gap-2.5 mt-5">
+        <button onclick="closeRestoreModal()" class="px-4 py-2 rounded-lg text-xs font-semibold text-brand-muted hover:text-brand-ink hover:bg-brand-panel2 transition-all">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+
+  try {
+    const r = await fetch(`/api/backups/list?database=${encodeURIComponent(database)}`);
+    const d = await r.json();
+    const body = document.getElementById('restore-body');
+    if (!d.files || !d.files.length) {
+      body.innerHTML = `<div class="text-xs text-brand-muted">No local backups found for ${database}.</div>`;
+      return;
+    }
+    body.innerHTML = `
+      <label class="block text-xs font-medium text-brand-muted mb-1.5">Backup to restore</label>
+      <select id="restore-file-select" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-4">
+        ${d.files.map((f, i) => `<option value="${f.file}">${new Date(f.modified_at).toLocaleString()} · ${fmtBytes(f.size_bytes)}${i === 0 ? ' (latest)' : ''}</option>`).join('')}
+      </select>
+      <button id="restore-preview-btn" class="px-3.5 py-2 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold">Preview changes</button>
+      <div id="restore-preview-body" class="mt-4"></div>`;
+    document.getElementById('restore-preview-btn').onclick = () => previewRestore(database, document.getElementById('restore-file-select').value);
+  } catch (e) {
+    document.getElementById('restore-body').innerHTML = `<div class="text-xs text-brand-terracotta">Could not load backups: ${String(e)}</div>`;
+  }
+}
+
+async function previewRestore(database, file) {
+  _restoreState = { database, file };
+  const el = document.getElementById('restore-preview-body');
+  el.innerHTML = `<div class="text-xs text-brand-muted">Comparing against live data…</div>`;
+  try {
+    const r = await fetch(`/api/backups/preview?database=${encodeURIComponent(database)}&file=${encodeURIComponent(file)}`);
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = `<div class="text-xs text-brand-terracotta">${d.detail || 'Preview failed'}</div>`; return; }
+    if (!d.live_db_reachable) {
+      el.innerHTML = `<div class="text-xs text-brand-terracotta mb-3">Could not read the live database to compare — proceed with extra caution.</div>`;
+    }
+    const rows = d.tables.map(t => {
+      const changed = t.current_rows !== t.backup_rows;
+      return `<div class="flex items-center justify-between text-xs py-1 ${changed ? 'text-brand-gold' : 'text-brand-muted'}">
+        <span class="font-mono">${t.table}</span>
+        <span>${t.current_rows ?? '?'} rows → ${t.backup_rows} rows</span>
+      </div>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="text-[10px] font-bold uppercase tracking-wider text-brand-muted mb-2">What will change (current → after restore)</div>
+      <div class="max-h-56 overflow-y-auto border border-brand-border rounded-lg p-2 mb-4">${rows || '<div class=\"text-xs text-brand-muted\">No tables found in backup.</div>'}</div>
+      <button id="restore-confirm-btn" class="px-3.5 py-2 rounded-lg bg-brand-terracotta text-white text-xs font-semibold transition-all hover:brightness-110">Continue to restore</button>`;
+    document.getElementById('restore-confirm-btn').onclick = () => confirmRestore(database, file);
+  } catch (e) {
+    el.innerHTML = `<div class="text-xs text-brand-terracotta">Preview failed: ${String(e)}</div>`;
+  }
+}
+
+async function confirmRestore(database, file) {
+  const typed = await dialogPrompt(`Type "${database}" to confirm — this permanently overwrites the live database with this backup.`, '');
+  if (typed !== database) {
+    if (typed !== null) await dialogAlert('Name did not match — restore cancelled.');
+    return;
+  }
+  if (!(await dialogConfirm(`Final confirmation: restore ${database} from this backup now? This cannot be undone.`, { confirmText: 'Restore', danger: true }))) return;
+
+  closeRestoreModal();
+  try {
+    const r = await fetch('/api/backups/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ database, file, confirm_name: database }),
+    });
+    const d = await r.json();
+    if (r.ok && d.ok) {
+      await dialogAlert(`${database} restored successfully.`);
+    } else {
+      await dialogAlert(`Restore failed:\n${d.output || d.detail || 'unknown error'}`);
+    }
+  } catch (e) {
+    await dialogAlert(`Restore failed: ${String(e)}`);
+  }
+  await loadBackups();
+}
+
+async function runBackupNow(btn) {
+  if (!(await dialogConfirm('Back up all 4 databases now?', { confirmText: 'Back up' }))) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Backing up… (can take a minute)';
+  try {
+    const r = await fetch('/api/backups/run', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) await dialogAlert('Backup failed:\n' + (d.output || d.detail || 'unknown error'));
+  } catch (e) {
+    await dialogAlert(String(e));
+  }
+  btn.disabled = false;
+  btn.textContent = original;
+  await loadBackups();
 }
 
 async function loadStats(first) {
@@ -70,12 +301,27 @@ async function loadStats(first) {
     .sort((a, b) => parsePercent(b.CPUPerc) - parsePercent(a.CPUPerc))
     .slice(0, 8);
 
-  const rows = containers.map((c, i) => {
+  const TIER_ORDER = { infra: 0, dev: 1, staging: 2, sandbox: 3, other: 4 };
+  const sortedContainers = [...containers].sort((a, b) => {
+    const ta = TIER_ORDER[(a.Meta || {}).tier] ?? 9, tb = TIER_ORDER[(b.Meta || {}).tier] ?? 9;
+    return ta - tb || (a.Names || '').localeCompare(b.Names || '');
+  });
+  const rows = sortedContainers.map((c, i) => {
     const s = statsByName[c.Names] || {};
     const running = (c.State || '').toLowerCase() === 'running';
+    const meta = c.Meta || { label: c.Names, tier: 'other', description: '' };
     return `<tr class="border-b border-brand-border/60 hover:bg-brand-panel/60 transition-colors animate-fade-in" style="animation-delay:${Math.min(i*15,300)}ms">
-      <td class="py-2.5 px-4"><span class="inline-flex items-center gap-2 text-sm"><span class="w-1.5 h-1.5 rounded-full ${running ? 'bg-emerald-400 animate-pulse-dot' : 'bg-brand-terracotta'}"></span>${c.Names}</span></td>
-      <td class="py-2.5 px-4 text-xs text-brand-muted font-mono truncate max-w-[200px]">${(c.Image || '').slice(0, 36)}</td>
+      <td class="py-2.5 px-4">
+        <div class="flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full ${running ? 'bg-emerald-400 animate-pulse-dot' : 'bg-brand-terracotta'} shrink-0"></span>
+          <div class="min-w-0">
+            <div class="text-sm font-medium">${meta.label}${meta.tier !== 'other' ? ` <span class="text-[9px] font-bold uppercase tracking-wider ${TIER_BADGE[meta.tier]} px-1.5 py-0.5 rounded-full ml-1">${TIER_LABEL[meta.tier]}</span>` : ''}</div>
+            <div class="text-[11px] text-brand-muted font-mono truncate">${c.Names}</div>
+            ${meta.description ? `<div class="text-[11px] text-brand-muted truncate max-w-[280px]" title="${meta.description.replace(/"/g, '&quot;')}">${meta.description}</div>` : ''}
+          </div>
+        </div>
+      </td>
+      <td class="py-2.5 px-4 text-xs text-brand-muted font-mono truncate max-w-[160px]">${(c.Image || '').slice(0, 30)}</td>
       <td class="py-2.5 px-4 text-xs text-brand-muted">${c.Status || ''}</td>
       <td class="py-2.5 px-4 text-xs font-mono">${s.CPUPerc || '—'}</td>
       <td class="py-2.5 px-4 text-xs font-mono">${s.MemUsage || '—'}</td>
@@ -122,11 +368,30 @@ async function loadStats(first) {
         </div>
       </div>
 
-      <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up" style="animation-delay:240ms">
-        <div class="px-4 py-3 border-b border-brand-border text-sm font-semibold">Recent activity (proposed + executed actions, every user)</div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:240ms">
+          <h2 class="text-sm font-semibold mb-3">Doctor — health checks</h2>
+          <div id="doctor-body"><div class="text-xs text-brand-muted">Loading…</div></div>
+        </div>
+        <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:260ms">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold">Database backups</h2>
+            <button id="backup-now-btn" class="px-2.5 py-1 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold">Back up now</button>
+          </div>
+          <div id="backups-body"><div class="text-xs text-brand-muted">Loading…</div></div>
+          <div class="text-[10px] text-brand-muted mt-2">Also runs automatically every night.</div>
+        </div>
+      </div>
+
+      <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up" style="animation-delay:280ms">
+        <div class="px-4 py-3 border-b border-brand-border text-sm font-semibold">Audit log — every proposed and executed action, every user</div>
         <div id="activity-list" class="divide-y divide-brand-border/60"><div class="text-xs text-brand-muted px-4 py-3">Loading…</div></div>
       </div>`;
       loadActivity();
+      loadDoctor();
+      loadBackups();
+      loadDiffBadge();
+      document.getElementById('backup-now-btn').onclick = (e) => runBackupNow(e.target);
 
     cpuChart = new Chart(document.getElementById('cpu-chart'), {
       type: 'bar',

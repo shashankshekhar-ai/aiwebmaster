@@ -12,7 +12,8 @@ from db.ai_usage import init_ai_usage_table
 from db.audit import init_audit_table
 from db.chat_sessions import init_chat_tables
 from db.deploy_state import init_deploy_state_table
-from routers import actions, agent, browse, chat, deploy, files, git, settings, system, users
+from db.deployments import init_deployments_table
+from routers import actions, agent, backups, browse, chat, deploy, doctor, files, git, settings, system, users
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -42,6 +43,10 @@ def on_startup() -> None:
         init_deploy_state_table()
     except Exception:
         logger.exception("failed to init aiwebmaster_deploy_state table")
+    try:
+        init_deployments_table()
+    except Exception:
+        logger.exception("failed to init aiwebmaster_deployments table")
     try:
         init_agent_tables()
     except Exception:
@@ -122,5 +127,7 @@ app.include_router(git.router, prefix="/api")
 app.include_router(deploy.router, prefix="/api")
 app.include_router(agent.router, prefix="/api")
 app.include_router(agent.ws_router, prefix="/api")
+app.include_router(doctor.router, prefix="/api")
+app.include_router(backups.router, prefix="/api")
 
 app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")

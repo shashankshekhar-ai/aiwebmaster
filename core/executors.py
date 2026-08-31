@@ -17,6 +17,7 @@ import psycopg2
 from core.config import settings
 from core.repo_state import git_state
 from db.deploy_state import set_last_publish
+from db.deployments import list_deployments, record_deployment
 
 
 class ExecutionError(Exception):
@@ -73,11 +74,28 @@ def run_git(payload: dict[str, Any]) -> dict[str, Any]:
     return {"steps": outputs, "ok": all(o["ok"] for o in outputs)}
 
 
+_KEEP_IMAGE_TAGS = 10
 _ALLOWED_COMPOSE_SERVICES = {"cms", "web", "api"}
 _PROD_COMPOSE_SERVICES = ["cms-prod", "web-prod", "api-prod"]
 _PROD_COMPOSE_ARGS = ["-f", "docker-compose.yml", "-f", "docker-compose.prod.yml"]
 _ALLOWED_STAGING_SERVICES = {"cms-prod", "web-prod", "api-prod"}
-_ALLOWED_OPS = {"rebuild", "start", "stop", "restart"}
+_ALLOWED_OPS = {"rebuild", "start", "stop", "restart", "rollback_to"}
+
+
+def _image_ref(service: str) -> str:
+    # Matches Docker Compose's own auto-derived image name for a service
+    # with no explicit `image:` key: "<project>-<service>".
+    return f"{settings.compose_project}-{service}"
+
+
+def _prune_old_image_tags(service: str, env: str) -> None:
+    """Best-effort: drop the actual image layers for builds beyond
+    _KEEP_IMAGE_TAGS — deployment HISTORY (the DB rows, hence rollback
+    targets) is kept forever, only the disk space is reclaimed. A failed
+    `docker rmi` (shared layers, already gone) is not an error here."""
+    rows = list_deployments(service=service, env=env, limit=1000)
+    for row in rows[_KEEP_IMAGE_TAGS:]:
+        _run_subprocess(["docker", "rmi", f"{_image_ref(service)}:{row['image_tag']}"], cwd=settings.repo_path, timeout=30)
 
 
 def run_docker(payload: dict[str, Any]) -> dict[str, Any]:
@@ -109,12 +127,49 @@ def run_docker(payload: dict[str, Any]) -> dict[str, Any]:
         result = _run_subprocess([*base, "restart", *services], cwd=settings.repo_path, timeout=180)
         return {"steps": [result], "ok": result["ok"]}
 
+    if op == "rollback_to":
+        # Redeploy a specific PAST build without rebuilding: retag that
+        # image as the one compose will pick up, then recreate — fast,
+        # and exact (byte-identical to what was actually running then).
+        image_tag = payload.get("image_tag")
+        if not image_tag or len(services) != 1:
+            raise ExecutionError("rollback_to requires exactly one service and a non-empty 'image_tag'")
+        service = services[0]
+        image = _image_ref(service)
+        tag_step = _run_subprocess(["docker", "tag", f"{image}:{image_tag}", f"{image}:latest"], cwd=settings.repo_path, timeout=30)
+        if not tag_step["ok"]:
+            return {"steps": [tag_step], "ok": False}
+        up = _run_subprocess([*base, "up", "-d", "--force-recreate", "--no-deps", service], cwd=settings.repo_path, timeout=300)
+        ok = tag_step["ok"] and up["ok"]
+        if ok:
+            record_deployment(service=service, env=env, git_sha=image_tag, image_tag=image_tag, actor=payload.get("_actor"), kind="rollback")
+        return {"steps": [tag_step, up], "ok": ok}
+
     # op == "rebuild" (default, matches original behavior): build then force-recreate.
     build = _run_subprocess([*base, "build", *services], cwd=settings.repo_path, timeout=1800)
     if not build["ok"]:
         return {"steps": [build], "ok": False}
-    up = _run_subprocess([*base, "up", "-d", "--force-recreate", *services], cwd=settings.repo_path, timeout=300)
-    return {"steps": [build, up], "ok": build["ok"] and up["ok"]}
+    # --no-deps: only touch the services actually requested. Without it,
+    # compose can decide a dependency (postgres, shared by every service)
+    # needs recreating too if it re-evaluates the dependency graph during
+    # a --force-recreate — observed once during testing (clean shutdown/
+    # restart, no data loss, but real momentary downtime for every service
+    # sharing that database). Rebuild should only ever touch what you asked
+    # it to touch.
+    up = _run_subprocess([*base, "up", "-d", "--force-recreate", "--no-deps", *services], cwd=settings.repo_path, timeout=300)
+    ok = build["ok"] and up["ok"]
+    steps = [build, up]
+    if ok:
+        sha, _ = git_state()
+        short_sha = sha[:12] if sha else "unknown"
+        for service in services:
+            image = _image_ref(service)
+            tag_result = _run_subprocess(["docker", "tag", f"{image}:latest", f"{image}:{short_sha}"], cwd=settings.repo_path, timeout=30)
+            steps.append(tag_result)
+            if tag_result["ok"]:
+                record_deployment(service=service, env=env, git_sha=short_sha, image_tag=short_sha, actor=payload.get("_actor"), kind="build")
+                _prune_old_image_tags(service, env)
+    return {"steps": steps, "ok": ok}
 
 
 _DB_URLS = {"cms": "cms_database_url", "api": "api_database_url"}
@@ -207,8 +262,10 @@ def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
     kind = payload.get("kind")
     doc_id = payload.get("docId")
     fields = payload.get("fields")
-    if kind not in {"page", "post", "resource", "case-study"}:
-        raise ExecutionError("content action requires kind: page|post|resource|case-study")
+    if kind not in {"page", "post", "resource", "case-study", "faq", "testimonial"}:
+        raise ExecutionError(
+            "content action requires kind: page|post|resource|case-study|faq|testimonial"
+        )
     if not isinstance(fields, dict):
         raise ExecutionError("content action requires a 'fields' object")
     publish = payload.get("publish", True)
@@ -217,7 +274,7 @@ def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{settings.cms_url}/api/page-agent/apply"
         body = {"pageId": doc_id, "proposal": fields, "publish": publish}
     else:
-        content_kind = {"post": "post", "resource": "resource", "case-study": "case-study"}[kind]
+        content_kind = kind
         url = f"{settings.cms_url}/api/content-agent/apply"
         body = {"kind": content_kind, "docId": doc_id, "proposal": fields, "publish": publish}
 
@@ -231,6 +288,24 @@ def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         result["live_check"] = _verify_content_live(kind, result.get("slug", ""), fields)
     return result
+
+
+def run_media_upload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Fetches an image from a URL (pasted/referenced in chat — there's no
+    file-attach UI) and hands it to the CMS's media-agent endpoint, which
+    uploads it into Payload's media collection via the Local API. Returns
+    the new media doc's id so a follow-up content action can reference it
+    (e.g. a testimonial's `photo` field, which no content action can set
+    directly — see the note in contentAgent.ts's testimonial fieldsDescription)."""
+    url = payload.get("url")
+    alt = payload.get("alt")
+    if not url or not alt:
+        raise ExecutionError("media action requires 'url' and 'alt'")
+    body = {"url": url, "alt": alt, "caption": payload.get("caption")}
+    resp = httpx.post(f"{settings.cms_url}/api/media-agent/upload", json=body, headers=_cms_headers(), timeout=30)
+    if resp.status_code >= 400:
+        raise ExecutionError(f"Media upload failed ({resp.status_code}): {resp.text[:500]}")
+    return resp.json()
 
 
 def _verify_nav_link_live(payload: dict[str, Any]) -> dict[str, Any]:
@@ -559,6 +634,7 @@ EXECUTORS = {
     "sql": run_sql,
     "content": call_content_agent,
     "nav_link": call_nav_endpoint,
+    "media": run_media_upload,
     "user_management": run_user_management,
     "publish": run_publish,
     "rollback": run_rollback,
