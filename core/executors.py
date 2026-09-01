@@ -257,7 +257,7 @@ def _verify_content_live(kind: str, slug: str, fields: dict[str, Any]) -> dict[s
     title = fields.get("title") or fields.get("label")
     if not title or not slug:
         return {"checked": False, "reason": "no title/slug to check for"}
-    path = _CONTENT_KIND_PATH.get(kind, "/{slug}").format(slug=slug)
+    path = _CONTENT_KIND_PATH.get(kind, "/{slug}").format(slug=slug.lstrip("/"))
     try:
         resp = httpx.get(f"{settings.web_url}{path}", timeout=15)
         if resp.status_code >= 400:

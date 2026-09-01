@@ -1,7 +1,7 @@
 """
-Read-only docker/system visibility for the System page. No exec here — this
-only ever shells out to inspect state (`docker ps`, `docker stats --no-stream`,
-`df`), never to change anything.
+Docker/system visibility for the System page, plus one safe mutation: cache
+pruning. Everything else here only ever shells out to inspect state
+(`docker ps`, `docker stats --no-stream`, `df`), never to change anything.
 """
 from __future__ import annotations
 
@@ -105,3 +105,43 @@ def stats(request: Request) -> dict:
         pass
 
     return {"container_stats": stats_rows, "disk": disk, "loadavg": loadavg}
+
+
+@router.get("/system/disk-breakdown")
+def disk_breakdown(request: Request) -> dict:
+    """`docker system df` — shown before the prune button so the user (not
+    just us) can see what's actually reclaimable before clicking anything."""
+    _require_docker_view(request)
+    out = _run(["docker", "system", "df"], timeout=15)
+    return {"raw": out}
+
+
+@router.post("/system/prune")
+def prune(request: Request) -> dict:
+    """Reclaims disk space the SAFE way — deliberately just `docker system
+    prune -f`, never `-a` and never `--volumes`:
+      - stopped containers: none of ours are ever meant to be stopped, so
+        this only ever catches genuine leftovers (e.g. a crashed one-off).
+      - dangling (untagged) images: layers with no tag pointing at them —
+        can't be what's running, can't be a rollback target (rollback tags
+        images by git SHA — see core/executors._image_ref — so a tagged
+        rollback image is never "dangling" and is never touched here).
+      - unused networks.
+      - build cache: safe to drop entirely, it's a pure speed optimization
+        that just gets rebuilt (slower) on the next build.
+    Never touches: running containers, ANY tagged image (including old
+    rollback-tagged builds), or volumes (so postgres data is untouched no
+    matter what). Same permission bar as viewing system stats — docker_ops/
+    infra_admin/super_admin, not ui_editor.
+    """
+    _require_docker_view(request)
+    before = _run(["docker", "system", "df", "--format", "{{.Type}}\t{{.Size}}"], timeout=15)
+    out = _run(["docker", "system", "prune", "-f"], timeout=120)
+    after = _run(["docker", "system", "df", "--format", "{{.Type}}\t{{.Size}}"], timeout=15)
+    if out.startswith("error:"):
+        raise HTTPException(status_code=500, detail=out)
+    reclaimed = None
+    for line in out.splitlines():
+        if line.lower().startswith("total reclaimed space"):
+            reclaimed = line.split(":", 1)[-1].strip()
+    return {"ok": True, "reclaimed": reclaimed, "raw": out, "before": before, "after": after}

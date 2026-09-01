@@ -38,14 +38,14 @@ def _check(name: str, ok: bool, detail: str) -> dict:
 
 def _check_env() -> list[dict]:
     checks = []
-    checks.append(_check("SESSION_SECRET", bool(settings.session_secret), "set" if settings.session_secret else "empty — sessions sign with an empty key"))
-    checks.append(_check("CMS_SERVICE_TOKEN", bool(settings.cms_service_token), "set" if settings.cms_service_token else "empty — content/nav_link/media actions will 401 against the CMS"))
+    checks.append(_check("Login session security", bool(settings.session_secret), "set" if settings.session_secret else "empty — sessions sign with an empty key"))
+    checks.append(_check("CMS connection key", bool(settings.cms_service_token), "set" if settings.cms_service_token else "empty — content/nav_link/media actions will 401 against the CMS"))
     key_field = "anthropic_api_key" if settings.ai_provider == "anthropic" else "gemini_api_key" if settings.ai_provider == "gemini" else None
     if key_field:
         has_key = bool(getattr(settings, key_field))
-        checks.append(_check(f"AI provider key ({settings.ai_provider})", has_key, "set" if has_key else f"empty — chat will fail, AI_PROVIDER={settings.ai_provider}"))
+        checks.append(_check(f"AI chat key ({settings.ai_provider})", has_key, "set" if has_key else f"empty — chat will fail, AI_PROVIDER={settings.ai_provider}"))
     else:
-        checks.append(_check("AI provider key", False, f"unrecognized AI_PROVIDER={settings.ai_provider!r}"))
+        checks.append(_check("AI chat key", False, f"unrecognized AI_PROVIDER={settings.ai_provider!r}"))
     return checks
 
 
@@ -57,17 +57,17 @@ def _check_compose_project() -> dict:
         )
         names = [n for n in result.stdout.splitlines() if n.strip()]
     except Exception as exc:
-        return _check("COMPOSE_PROJECT", False, f"check failed: {exc}")
+        return _check("Docker project", False, f"check failed: {exc}")
     ok = len(names) > 0
-    return _check("COMPOSE_PROJECT", ok, f"'{settings.compose_project}' -> {len(names)} containers" if ok else f"'{settings.compose_project}' matches no running containers — docker/publish/codegen_agent actions will silently target nothing")
+    return _check("Docker project", ok, f"'{settings.compose_project}' -> {len(names)} containers" if ok else f"'{settings.compose_project}' matches no running containers — docker/publish/codegen_agent actions will silently target nothing")
 
 
 def _check_databases() -> list[dict]:
     dbs = {
-        "tbg_api (dev)": settings.api_database_url,
-        "tbg_cms (dev)": settings.cms_database_url,
-        "tbg_api_prod (staging)": settings.api_database_url_prod,
-        "tbg_cms_prod (staging)": settings.cms_database_url_prod,
+        "API database (dev)": settings.api_database_url,
+        "CMS database (dev)": settings.cms_database_url,
+        "API database (preview)": settings.api_database_url_prod,
+        "CMS database (preview)": settings.cms_database_url_prod,
     }
     checks = []
     for label, dsn in dbs.items():
@@ -89,9 +89,9 @@ def _check_cms() -> dict:
     try:
         resp = httpx.get(f"{settings.cms_url}/api/pages?limit=1", headers={"x-service-token": settings.cms_service_token}, timeout=8)
         ok = resp.status_code < 400
-        return _check("CMS reachable", ok, f"{settings.cms_url} -> {resp.status_code}")
+        return _check("CMS connection", ok, f"{settings.cms_url} -> {resp.status_code}")
     except Exception as exc:
-        return _check("CMS reachable", False, f"{settings.cms_url} -> {str(exc)[:200]}")
+        return _check("CMS connection", False, f"{settings.cms_url} -> {str(exc)[:200]}")
 
 
 @router.get("/doctor/check")

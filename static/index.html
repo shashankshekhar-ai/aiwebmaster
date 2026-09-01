@@ -26,15 +26,15 @@
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot"></span>Preview (dev)
       </a>
       <a id="live-link" href="#" target="_blank" class="hidden sm:flex items-center gap-1.5 text-xs text-brand-muted hover:text-brand-ink transition-colors px-2.5 py-1.5 rounded-lg border border-brand-border hover:border-brand-gold/40">
-        <span class="w-1.5 h-1.5 rounded-full bg-brand-gold animate-pulse-dot"></span>Live (staging)
+        <span class="w-1.5 h-1.5 rounded-full bg-brand-gold animate-pulse-dot"></span>Live (preview)
       </a>
       <button id="rollback-btn" style="display:none;"
         class="items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-panel2 text-brand-ink border border-brand-border transition-all hover:brightness-110 active:scale-[.97] disabled:opacity-40 disabled:cursor-default">
-        Rollback staging
+        Rollback preview
       </button>
       <button id="publish-btn" style="display:none;"
         class="items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-terracotta text-white transition-all hover:brightness-110 active:scale-[.97] disabled:opacity-40 disabled:cursor-default">
-        Publish to staging
+        Deploy to preview
       </button>
     </div>
   </header>
@@ -128,6 +128,51 @@ async function loadEditContext() {
   }
 }
 
+// Handler for the header "Deploy to preview" button — the only place that
+// promotes dev to the preview (staging) tier, and only super_admin ever
+// sees it (canRun gate below + backend ROLE_PERMISSIONS/DOCKER_STAGING_ROLES
+// both restrict it). Content/nav/media changes go live in dev immediately
+// on Run (no deploy needed to see them there); preview promotion is a
+// deliberate, separate, backed-up step, so it stays a single explicit
+// control rather than something offered after every chat action.
+async function doPublish(btn) {
+  if (!(await dialogConfirm('Deploy dev content + current code to preview? This overwrites the preview database (a backup is taken first) and redeploys the preview containers.', { confirmText: 'Deploy' }))) return;
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'Deploying… (can take a few minutes)';
+  addMsg('user', 'Deploy dev to preview');
+  try {
+    const res = await fetch('/api/actions/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'publish-' + Date.now(), type: 'publish', payload: { target: 'prod' } }),
+    });
+    const data = await res.json();
+    addMsg('assistant', res.ok ? 'Deployed to preview.' : 'Deploy failed — see details below.');
+    const pre = document.createElement('pre');
+    pre.className = 'text-[11px] bg-brand-navy2 border border-brand-border rounded-lg p-3 max-w-[70%] ml-11 overflow-auto max-h-64 animate-fade-in';
+    pre.textContent = JSON.stringify(data, null, 2);
+    log.appendChild(pre);
+  } catch (e) {
+    addMsg('assistant', 'Deploy failed: ' + e);
+  }
+  btn.textContent = originalText;
+  const headerBtn = document.getElementById('publish-btn');
+  if (headerBtn) {
+    headerBtn.disabled = true;
+    headerBtn.title = 'Checking for changes…';
+    try {
+      const res2 = await fetch('/api/deploy/diff');
+      if (res2.ok) {
+        const d2 = await res2.json();
+        headerBtn.disabled = !d2.has_changes;
+        headerBtn.title = d2.has_changes ? '' : 'Dev and preview already match — nothing to deploy.';
+      }
+    } catch (e) { headerBtn.disabled = false; headerBtn.title = ''; }
+  }
+  if (btn !== headerBtn) btn.disabled = true;
+}
+
 // Matches the header subtitle to what this role can actually do — a
 // ui_editor never sees docker/sql action cards, so telling them upfront
 // "run SQL, redeploy services" is just confusing, not helpful.
@@ -167,7 +212,7 @@ async function init() {
 
     if (diff && !diff.has_changes) {
       btn.disabled = true;
-      btn.title = 'Dev and staging already match — nothing to publish.';
+      btn.title = 'Dev and preview already match — nothing to deploy.';
     } else {
       btn.disabled = false;
       btn.title = diff
@@ -175,49 +220,18 @@ async function init() {
         : '';
     }
 
-    btn.onclick = async () => {
-      if (!(await dialogConfirm('Publish dev content + current code to staging? This overwrites the staging database (a backup is taken first) and redeploys the staging containers.', { confirmText: 'Publish' }))) return;
-      btn.disabled = true;
-      btn.textContent = 'Publishing… (can take a few minutes)';
-      addMsg('user', 'Publish dev to staging');
-      try {
-        const res = await fetch('/api/actions/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: 'publish-' + Date.now(), type: 'publish', payload: { target: 'prod' } }),
-        });
-        const data = await res.json();
-        addMsg('assistant', res.ok ? 'Published to staging.' : 'Publish failed — see details below.');
-        const pre = document.createElement('pre');
-        pre.className = 'text-[11px] bg-brand-navy2 border border-brand-border rounded-lg p-3 max-w-[70%] ml-11 overflow-auto max-h-64 animate-fade-in';
-        pre.textContent = JSON.stringify(data, null, 2);
-        log.appendChild(pre);
-      } catch (e) {
-        addMsg('assistant', 'Publish failed: ' + e);
-      }
-      btn.textContent = 'Publish to staging';
-      btn.disabled = true;
-      btn.title = 'Checking for changes…';
-      try {
-        const res2 = await fetch('/api/deploy/diff');
-        if (res2.ok) {
-          const d2 = await res2.json();
-          btn.disabled = !d2.has_changes;
-          btn.title = d2.has_changes ? '' : 'Dev and staging already match — nothing to publish.';
-        }
-      } catch (e) { btn.disabled = false; btn.title = ''; }
-    };
+    btn.onclick = () => doPublish(btn);
 
     const rbBtn = document.getElementById('rollback-btn');
     if (canRun(me, 'rollback')) {
       rbBtn.style.display = 'flex';
       rbBtn.disabled = !diff || !diff.has_backup;
-      rbBtn.title = diff && !diff.has_backup ? 'No publish backup to roll back to yet.' : '';
+      rbBtn.title = diff && !diff.has_backup ? 'No deploy backup to roll back to yet.' : '';
       rbBtn.onclick = async () => {
-        if (!(await dialogConfirm('Roll staging back to the most recent pre-publish backup? This overwrites the current staging database.', { confirmText: 'Rollback', danger: true }))) return;
+        if (!(await dialogConfirm('Roll preview back to the most recent pre-deploy backup? This overwrites the current preview database.', { confirmText: 'Rollback', danger: true }))) return;
         rbBtn.disabled = true;
         rbBtn.textContent = 'Rolling back…';
-        addMsg('user', 'Rollback staging');
+        addMsg('user', 'Rollback preview');
         try {
           const res = await fetch('/api/actions/run', {
             method: 'POST',
@@ -225,7 +239,7 @@ async function init() {
             body: JSON.stringify({ id: 'rollback-' + Date.now(), type: 'rollback', payload: {} }),
           });
           const data = await res.json();
-          addMsg('assistant', res.ok ? 'Rolled staging back.' : 'Rollback failed — see details below.');
+          addMsg('assistant', res.ok ? 'Rolled preview back.' : 'Rollback failed — see details below.');
           const pre = document.createElement('pre');
           pre.className = 'text-[11px] bg-brand-navy2 border border-brand-border rounded-lg p-3 max-w-[70%] ml-11 overflow-auto max-h-64 animate-fade-in';
           pre.textContent = JSON.stringify(data, null, 2);
@@ -234,7 +248,7 @@ async function init() {
           addMsg('assistant', 'Rollback failed: ' + e);
         }
         rbBtn.disabled = false;
-        rbBtn.textContent = 'Rollback staging';
+        rbBtn.textContent = 'Rollback preview';
       };
     }
   }
@@ -259,7 +273,7 @@ const EXAMPLE_PROMPTS_BY_ROLE = {
   super_admin: [
     'Add a new blog post about our latest workshop',
     'Update the homepage navigation',
-    'Publish dev content to staging',
+    'Deploy dev content to preview',
   ],
 };
 
@@ -340,7 +354,41 @@ function followUpEl(action, result) {
   wrap.className = 'mt-1';
 
   if (action.type === 'content' || action.type === 'nav_link') {
-    // CMS-served — already live, no rebuild needed.
+    // Saved as a draft (Payload's own draft/published status, unrelated to
+    // the dev/staging "Deploy" step) — the public dev site only ever reads
+    // status:published, so a draft literally isn't visible yet. Give a
+    // one-click way to flip it live instead of forcing the user to type a
+    // second chat message ("now publish it") and wait on another LLM call.
+    if (result && result.draft && canRun(me, 'content')) {
+      const btn = document.createElement('button');
+      btn.textContent = 'Publish now';
+      btn.className = 'px-3 py-1.5 rounded-lg bg-brand-gold text-brand-navy text-xs font-semibold transition-all hover:brightness-105 active:scale-[.97] mr-2';
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = 'Publishing…';
+        try {
+          const res = await fetch('/api/actions/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: 'publish-doc-' + Date.now(),
+              type: action.type,
+              payload: { ...action.payload, docId: String(result.id), publish: true },
+            }),
+          });
+          if (res.ok) {
+            btn.replaceWith(previewLink('✓ Published — ↗ Preview (dev)'));
+          } else {
+            btn.textContent = 'Publish failed';
+            btn.disabled = false;
+          }
+        } catch (e) {
+          btn.textContent = 'Publish failed';
+          btn.disabled = false;
+        }
+      };
+      wrap.appendChild(btn);
+    }
     wrap.appendChild(previewLink('↗ Preview (dev)'));
     return wrap;
   }
@@ -357,12 +405,12 @@ function followUpEl(action, result) {
     if (!service || !canRun(me, 'docker')) return wrap;
 
     const btn = document.createElement('button');
-    btn.textContent = `Rebuild ${service} & Preview`;
+    btn.textContent = `Deploy to dev`;
     btn.className = 'px-3 py-1.5 rounded-lg bg-brand-teal/15 text-brand-teal text-xs font-semibold transition-all hover:bg-brand-teal/25 active:scale-[.97]';
     btn.onclick = async () => {
-      if (!(await dialogConfirm(`Rebuild and redeploy the '${service}' dev container to pick up this change?`, { confirmText: 'Rebuild' }))) return;
+      if (!(await dialogConfirm(`Rebuild and redeploy the '${service}' dev container to pick up this change?`, { confirmText: 'Deploy' }))) return;
       btn.disabled = true;
-      btn.textContent = 'Rebuilding… (can take a minute)';
+      btn.textContent = 'Deploying… (can take a minute)';
       try {
         const res = await fetch('/api/actions/run', {
           method: 'POST',
@@ -370,9 +418,9 @@ function followUpEl(action, result) {
           body: JSON.stringify({ id: 'rebuild-' + Date.now(), type: 'docker', payload: { env: 'dev', op: 'rebuild', services: [service] } }),
         });
         const ok = res.ok;
-        btn.replaceWith(previewLink(ok ? '✓ Rebuilt — ↗ Preview (dev)' : 'Rebuild failed — check Deploy page'));
+        btn.replaceWith(previewLink(ok ? '✓ Deployed to dev — ↗ Preview' : 'Deploy failed — check Deploy page'));
       } catch (e) {
-        btn.textContent = 'Rebuild failed';
+        btn.textContent = 'Deploy failed';
         btn.disabled = false;
       }
     };
@@ -402,21 +450,21 @@ function followUpEl(action, result) {
       )];
       services.forEach(service => {
         const btn = document.createElement('button');
-        btn.textContent = `Rebuild ${service} & Preview`;
+        btn.textContent = `Deploy to dev`;
         btn.className = 'px-3 py-1.5 rounded-lg bg-brand-teal/15 text-brand-teal text-xs font-semibold transition-all hover:bg-brand-teal/25 active:scale-[.97] mr-2 mt-2';
         btn.onclick = async () => {
-          if (!(await dialogConfirm(`Rebuild and redeploy the '${service}' dev container to pick up this change?`, { confirmText: 'Rebuild' }))) return;
+          if (!(await dialogConfirm(`Rebuild and redeploy the '${service}' dev container to pick up this change?`, { confirmText: 'Deploy' }))) return;
           btn.disabled = true;
-          btn.textContent = 'Rebuilding… (can take a minute)';
+          btn.textContent = 'Deploying… (can take a minute)';
           try {
             const res = await fetch('/api/actions/run', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ id: 'rebuild-' + Date.now(), type: 'docker', payload: { env: 'dev', op: 'rebuild', services: [service] } }),
             });
-            btn.replaceWith(previewLink(res.ok ? '✓ Rebuilt — ↗ Preview (dev)' : 'Rebuild failed — check Deploy page'));
+            btn.replaceWith(previewLink(res.ok ? '✓ Deployed to dev — ↗ Preview' : 'Deploy failed — check Deploy page'));
           } catch (e) {
-            btn.textContent = 'Rebuild failed';
+            btn.textContent = 'Deploy failed';
             btn.disabled = false;
           }
         };
@@ -448,7 +496,7 @@ function friendlySummary(a) {
   if (a.type === 'docker') {
     const services = (p.services || []).join(', ') || 'service';
     const opLabel = { rebuild: 'Rebuild and restart', restart: 'Restart', start: 'Start', stop: 'Stop' }[p.op || 'rebuild'] || 'Update';
-    const env = p.env === 'staging' ? 'staging' : 'dev';
+    const env = p.env === 'staging' ? 'preview' : 'dev';
     return `${opLabel} ${services} on ${env}`;
   }
   if (a.type === 'git') {
@@ -468,8 +516,8 @@ function friendlySummary(a) {
     const prompt = (p.prompt || '').slice(0, 140);
     return `Hand this task to an AI coding agent: "${prompt}${(p.prompt || '').length > 140 ? '…' : ''}"`;
   }
-  if (a.type === 'publish') return 'Publish current dev content + code to staging (backs up staging first)';
-  if (a.type === 'rollback') return 'Restore staging from the most recent backup';
+  if (a.type === 'publish') return 'Deploy current dev content + code to preview (backs up preview first)';
+  if (a.type === 'rollback') return 'Restore preview from the most recent backup';
   if (a.type === 'nginx' || a.type === 'system') return `Suggested command (draft only — you run it by hand): ${p.command || ''}`;
   return null;
 }
@@ -484,7 +532,7 @@ function friendlyResultSummary(a, ok, data) {
   if (a.type === 'docker') {
     const services = (p.services || []).join(', ') || 'the service';
     const opLabel = { rebuild: 'rebuilt and restarted', restart: 'restarted', start: 'started', stop: 'stopped' }[p.op || 'rebuild'] || 'updated';
-    const env = p.env === 'staging' ? 'staging' : 'dev';
+    const env = p.env === 'staging' ? 'preview' : 'dev';
     if (ok) return `${services} ${opLabel} successfully on ${env}. It's live now.`;
     const failedStep = (data.steps || []).find(s => !s.ok);
     const why = failedStep ? (failedStep.stderr || failedStep.stdout || '').trim().slice(-300) : '';
@@ -623,6 +671,7 @@ function addActions(actions) {
             ? 'px-3.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-semibold'
             : 'px-3.5 py-1.5 rounded-lg bg-brand-terracotta/20 text-brand-terracotta text-xs font-semibold';
           if (res.ok) footer.appendChild(followUpEl(a, data));
+          if (res.ok) await maybeAutoInvestigate(a, data);
         } catch (e) {
           rawJson.textContent = String(e);
           const details = document.createElement('details');
@@ -656,6 +705,70 @@ function addTyping() {
   log.scrollTop = log.scrollHeight;
 }
 function removeTyping() { document.getElementById('typing-indicator')?.remove(); }
+
+// Core "send one turn to the model and render what comes back" logic,
+// shared by the normal input box AND the automatic self-check follow-up
+// (see maybeAutoInvestigate below) — the latter needs the exact same
+// request/render behavior, just triggered by code instead of a keypress,
+// and without echoing a fabricated "user" bubble for text the user never
+// typed.
+async function sendTurn(text, { showUserBubble = true, editContextOverride } = {}) {
+  if (showUserBubble) addMsg('user', text);
+  history.push({ role: 'user', content: text });
+
+  send.disabled = true;
+  addTyping();
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: history, session_id: currentSessionId, edit_context: editContextOverride ?? null }),
+    });
+    removeTyping();
+    if (res.status === 401) { await redirectToLogin(res); return; }
+    const data = await res.json();
+    if (!res.ok) { addMsg('assistant', 'Error: ' + (data.detail || res.status)); return; }
+    if (data.session_id && data.session_id !== currentSessionId) {
+      currentSessionId = data.session_id;
+      window.history.replaceState({}, '', '/?session=' + currentSessionId);
+      mountChatMenu('/');
+    }
+    addMsg('assistant', data.reply);
+    history.push({ role: 'assistant', content: data.reply });
+    if (data.actions && data.actions.length) addActions(data.actions);
+  } catch (e) {
+    removeTyping();
+    addMsg('assistant', 'Error: ' + e);
+  } finally {
+    send.disabled = false;
+    input.focus();
+  }
+}
+
+// A save can report success from the CMS/DB's point of view while the
+// change is genuinely invisible on the actual site (e.g. a page whose
+// rendering component doesn't read that data at all — confirmed to happen
+// for real, more than once). A non-technical user has no way to know that
+// distinction or what to do about it. So instead of just telling them
+// "might need a manual look", automatically kick off a follow-up turn that
+// hands the model the concrete live_check failure and lets it propose the
+// actual fix (typically a codegen_agent investigation) — no extra typing
+// required. Still only ever *proposes* — the human still clicks Run.
+async function maybeAutoInvestigate(action, data) {
+  const lc = data && data.live_check;
+  if (!lc || !lc.checked || lc.visible !== false) return;
+  if (!canRun(me, 'codegen_agent') && !canRun(me, 'code_edit')) return; // nothing this role could do with the answer anyway
+  const note = document.createElement('div');
+  note.className = 'text-xs text-brand-muted ml-11 mt-1 mb-1 italic animate-fade-in';
+  note.textContent = 'That saved but isn’t showing up live — checking why…';
+  log.appendChild(note);
+  log.scrollTop = log.scrollHeight;
+  const path = lc.path || '/';
+  await sendTurn(
+    `(automatic check) The action "${action.description}" just completed and the CMS/DB write succeeded, but a live check of ${path} on the actual dev site did not find the change. This means the page/component that should render it may not actually read this data — do not propose the same content/nav_link action again, and do not just say to check back later. Investigate the real cause and propose the concrete fix (use codegen_agent if you need to see the actual rendering code).`,
+    { showUserBubble: false },
+  );
+}
 
 async function submit() {
   if (!input.value.trim()) return;
@@ -691,35 +804,7 @@ async function submit() {
     }
     editContext = null;
   }
-  history.push({ role: 'user', content: text });
-
-  send.disabled = true;
-  addTyping();
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history, session_id: currentSessionId, edit_context: pendingEditContext }),
-    });
-    removeTyping();
-    if (res.status === 401) { await redirectToLogin(res); return; }
-    const data = await res.json();
-    if (!res.ok) { addMsg('assistant', 'Error: ' + (data.detail || res.status)); return; }
-    if (data.session_id && data.session_id !== currentSessionId) {
-      currentSessionId = data.session_id;
-      window.history.replaceState({}, '', '/?session=' + currentSessionId);
-      mountChatMenu('/');
-    }
-    addMsg('assistant', data.reply);
-    history.push({ role: 'assistant', content: data.reply });
-    if (data.actions && data.actions.length) addActions(data.actions);
-  } catch (e) {
-    removeTyping();
-    addMsg('assistant', 'Error: ' + e);
-  } finally {
-    send.disabled = false;
-    input.focus();
-  }
+  await sendTurn(text, { showUserBubble: false, editContextOverride: pendingEditContext });
 }
 
 send.addEventListener('click', submit);

@@ -5,6 +5,7 @@ Best-effort: any failure here should never block chat.
 """
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 from functools import lru_cache
@@ -64,7 +65,21 @@ def build_site_context() -> str:
     lines = ["Current site state (live snapshot, for grounding your proposals):"]
 
     if pages:
-        lines.append("Pages: " + ", ".join(f"{p.get('title')} (/{p.get('slug')})" for p in pages))
+        # Full `layout` included per page (not just title/slug) — a "content"
+        # action on kind:page must send the COMPLETE blocks array, and
+        # without the current blocks already in context the model has no
+        # way to do that except asking the user to paste their own page's
+        # JSON back to them, which is what happened live before this fix.
+        # Small page count on this site (single digits) keeps this cheap.
+        page_lines = []
+        for p in pages:
+            layout = p.get("layout")
+            layout_json = json.dumps(layout, separators=(",", ":")) if layout else "[]"
+            page_lines.append(
+                f"- {p.get('title')} (id: {p.get('id')}, slug: /{p.get('slug')}, status: {p.get('status')}) "
+                f"blocks: {layout_json}"
+            )
+        lines.append("Pages (with current block layout — use this, never ask the user to paste it):\n" + "\n".join(page_lines))
     if posts:
         lines.append("Posts/Insights: " + ", ".join(f"{p.get('title')} (/insights/{p.get('slug')})" for p in posts))
     if nav:

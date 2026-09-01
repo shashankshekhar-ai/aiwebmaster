@@ -63,3 +63,14 @@ proposed copy — this firm's tone is confident and concrete, not salesy.
   Changing the logo today means a `code_edit` to that file, not a `content` action.
 - `/contact` (`apps/web/app/contact/page.tsx`) is a hardcoded Next.js route,
   not a CMS `pages` doc — same limitation, needs `code_edit` not `content`.
+- The homepage (`/`, `apps/web/app/page.tsx`) is ENTIRELY hardcoded — hero,
+  carousel, three paths, "How It's Different" cards, closing CTA are all
+  literal arrays/JSX in that file and `apps/web/components/home/*.tsx`, not
+  read from any CMS collection. A `pages` doc with slug "home" may exist in
+  the CMS (id 5, leftover from early testing) — it renders nowhere; a
+  `content` action against it always reports success but is never visible
+  live, confirmed repeatedly. ANY request to change something on the
+  homepage — a card, headline, CTA text, anything — must be a `code_edit` or
+  `codegen_agent` action against these files, never a `content` action with
+  kind:"page" and slug "home". If genuinely unsure which file/array holds
+  the text in question, use `codegen_agent` rather than guessing.

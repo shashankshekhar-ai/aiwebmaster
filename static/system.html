@@ -94,11 +94,20 @@ async function loadDoctor() {
     const r = await fetch('/api/doctor/check');
     if (r.status === 403) { el.innerHTML = `<div class="text-xs text-brand-muted">Needs docker access to view.</div>`; return; }
     const d = await r.json();
-    el.innerHTML = d.checks.map(c => `<div class="flex items-start gap-2 text-xs py-1">
-      ${statusDot(c.ok)}
-      <span class="font-medium shrink-0">${c.name}:</span>
-      <span class="text-brand-muted truncate">${(c.detail || '').replace(/</g, '&lt;')}</span>
-    </div>`).join('');
+    const rows = d.checks.map(c => `<tr class="border-b border-brand-border/40 last:border-0">
+      <td class="py-2 pr-3 w-5">${statusDot(c.ok)}</td>
+      <td class="py-2 pr-3 font-medium whitespace-nowrap">${c.name}</td>
+      <td class="py-2 text-brand-muted ${c.ok ? '' : 'text-brand-terracotta'} break-all">${(c.detail || '').replace(/</g, '&lt;')}</td>
+    </tr>`).join('');
+    el.innerHTML = `<div class="flex items-center justify-between mb-2">
+      <span class="text-[11px] text-brand-muted">${d.checks.filter(c => c.ok).length}/${d.checks.length} passing</span>
+    </div>
+    <table class="w-full text-left text-xs">
+      <thead><tr class="text-[10px] uppercase tracking-wider text-brand-muted">
+        <th class="pb-1.5 font-semibold"></th><th class="pb-1.5 font-semibold pr-3">Check</th><th class="pb-1.5 font-semibold">Result</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
   } catch (e) {
     el.innerHTML = `<div class="text-xs text-brand-muted">Could not run checks: ${String(e)}</div>`;
   }
@@ -271,6 +280,33 @@ async function runBackupNow(btn) {
   await loadBackups();
 }
 
+async function runClearCache(btn) {
+  const confirmed = await dialogConfirm(
+    'Clear Docker cache to free up disk space?\n\nThis removes: unused build cache, untagged (dangling) image layers, stopped containers, and unused networks.\n\nIt does NOT touch: any running container, any tagged image (including old builds kept for Rollback), or any volume — so no database data, uploaded media, or deployable version is at risk.',
+    { confirmText: 'Clear cache' },
+  );
+  if (!confirmed) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = 'Clearing… (can take a minute)';
+  const resultEl = document.getElementById('clear-cache-result');
+  resultEl.textContent = '';
+  try {
+    const r = await fetch('/api/system/prune', { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      await dialogAlert('Clear cache failed:\n' + (d.detail || d.raw || 'unknown error'));
+    } else {
+      resultEl.textContent = d.reclaimed ? `✓ Freed ${d.reclaimed}.` : '✓ Done — nothing to reclaim.';
+    }
+  } catch (e) {
+    await dialogAlert(String(e));
+  }
+  btn.disabled = false;
+  btn.textContent = original;
+  await loadStats(false);
+}
+
 async function loadStats(first) {
   const [contRes, statsRes] = await Promise.all([fetch('/api/system/containers'), fetch('/api/system/stats')]);
   const content = document.getElementById('content');
@@ -344,8 +380,12 @@ async function loadStats(first) {
           <div id="cpu-rows" class="space-y-2.5"></div>
         </div>
         <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:160ms">
-          <h2 class="text-sm font-semibold mb-3">Disk usage (repo mount)</h2>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold">Disk usage (repo mount)</h2>
+            <button id="clear-cache-btn" class="px-2.5 py-1 rounded-lg bg-brand-panel2 border border-brand-border text-xs font-medium transition-all hover:border-brand-gold">Clear Docker cache</button>
+          </div>
           <div id="disk-meter"></div>
+          <div id="clear-cache-result" class="text-[11px] text-brand-muted mt-2"></div>
         </div>
       </div>
 
@@ -385,6 +425,7 @@ async function loadStats(first) {
       loadBackups();
       loadDiffBadge();
       document.getElementById('backup-now-btn').onclick = (e) => runBackupNow(e.target);
+      document.getElementById('clear-cache-btn').onclick = (e) => runClearCache(e.target);
   } else {
     document.getElementById('stat-up').textContent = up;
     document.getElementById('stat-load').textContent = load.join(' / ');
