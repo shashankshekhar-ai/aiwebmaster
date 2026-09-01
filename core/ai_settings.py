@@ -23,7 +23,10 @@ CREATE TABLE IF NOT EXISTS aiwebmaster_ai_settings (
 );
 """
 
-PROVIDERS = {"anthropic", "openai", "gemini"}
+# claude_cli: routes through the claude-agent sandbox's persisted Claude
+# Code CLI login (a Claude subscription) instead of a billed API key — see
+# core/ai_provider.py::_call_claude_cli.
+PROVIDERS = {"anthropic", "openai", "gemini", "claude_cli"}
 
 
 def init_ai_settings_table() -> None:

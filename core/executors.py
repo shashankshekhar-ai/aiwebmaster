@@ -281,7 +281,20 @@ def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
 
     if kind == "page":
         url = f"{settings.cms_url}/api/page-agent/apply"
-        body = {"pageId": doc_id, "proposal": fields, "publish": publish}
+        block_ops = fields.get("blockOps")
+        if block_ops:
+            # Delta mode — see BlockOpError/applyBlockOps in the CMS's
+            # lib/pageAgent.ts. Sends only the change (e.g. one new card),
+            # the CMS fetches the page's current state itself and merges —
+            # keeps model output size bounded by the edit, not the page, so
+            # a page with many blocks/cards can't blow the output token
+            # limit on a small change (confirmed live: it did, before this).
+            body: dict[str, Any] = {"pageId": doc_id, "blockOps": block_ops, "publish": publish}
+            proposal_override = {k: v for k, v in fields.items() if k in ("title", "slug")}
+            if proposal_override:
+                body["proposal"] = proposal_override
+        else:
+            body = {"pageId": doc_id, "proposal": fields, "publish": publish}
     else:
         content_kind = kind
         url = f"{settings.cms_url}/api/content-agent/apply"
@@ -295,7 +308,10 @@ def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
         # Saved as a draft on purpose — it's *correct* that it won't show live yet.
         result["live_check"] = {"checked": False, "reason": "saved as draft, not published"}
     else:
-        result["live_check"] = _verify_content_live(kind, result.get("slug", ""), fields)
+        # In blockOps mode `fields` has no title (that's the point — it's a
+        # delta) — the CMS response carries the real title instead.
+        title_source = {**fields, "title": fields.get("title") or result.get("title")}
+        result["live_check"] = _verify_content_live(kind, result.get("slug", ""), title_source)
     return result
 
 

@@ -22,16 +22,18 @@
 
 <script src="/assets/sidebar.js"></script>
 <script>
-const PROVIDER_LABELS = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI (Codex / GPT)', gemini: 'Google (Gemini)' };
+const PROVIDER_LABELS = { anthropic: 'Anthropic (Claude, API key)', openai: 'OpenAI (Codex / GPT)', gemini: 'Google (Gemini)', claude_cli: 'Claude (via subscription)' };
 const PROVIDER_DESC = {
   anthropic: 'Best at following instructions and remembering earlier context in a conversation. Slightly more expensive per message.',
   gemini: 'Fast and low-cost. Good for straightforward requests; can occasionally lose track of context in a long back-and-forth.',
   openai: 'General-purpose, similar cost to Gemini.',
+  claude_cli: "Uses this host's logged-in Claude subscription instead of a billed API key — no key to manage, but each reply shells out to the Claude Code CLI, so it's noticeably slower than the other options.",
 };
 const PROVIDER_KEY_HELP = {
   anthropic: 'Get a key at console.anthropic.com — look for "API Keys" in the left menu.',
   gemini: 'Get a key at aistudio.google.com/apikey.',
   openai: 'Get a key at platform.openai.com/api-keys.',
+  claude_cli: 'No key needed — uses the Claude subscription already logged into this host.',
 };
 
 function fmtNum(n) { return (n || 0).toLocaleString(); }
@@ -123,9 +125,11 @@ async function load() {
         <select id="f-provider" class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-1.5">${options}</select>
         <div id="f-provider-desc" class="text-[11px] text-brand-muted mb-4 leading-relaxed"></div>
 
-        <label class="block text-xs font-medium text-brand-muted mb-1.5">API key</label>
-        <input id="f-key" type="password" autocomplete="off" placeholder="Paste your key here"
-          class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-1.5" />
+        <div id="key-field-wrap">
+          <label class="block text-xs font-medium text-brand-muted mb-1.5">API key</label>
+          <input id="f-key" type="password" autocomplete="off" placeholder="Paste your key here"
+            class="w-full px-3 py-2 rounded-lg bg-brand-navy2 border border-brand-border text-sm outline-none focus:border-brand-gold transition-all mb-1.5" />
+        </div>
         <div id="f-key-help" class="text-[11px] text-brand-muted mb-5 leading-relaxed"></div>
 
         <button id="f-save" class="px-4 py-2 rounded-lg bg-brand-gold text-brand-navy text-sm font-semibold transition-all hover:brightness-105 active:scale-[.98]">Save</button>
@@ -170,10 +174,12 @@ async function load() {
   const descEl = document.getElementById('f-provider-desc');
   const keyHelpEl = document.getElementById('f-key-help');
   const modelManual = document.getElementById('f-model-manual');
+  const keyFieldWrap = document.getElementById('key-field-wrap');
   function syncProviderHelp() {
     const p = providerSel.value;
     descEl.textContent = PROVIDER_DESC[p] || '';
     keyHelpEl.textContent = PROVIDER_KEY_HELP[p] || '';
+    keyFieldWrap.classList.toggle('hidden', p === 'claude_cli');
     // Pre-fill a sane default model so Save works even if the user never
     // opens "Advanced" — only overwrite if they haven't typed one themselves.
     if (!modelManual.dataset.userEdited) modelManual.value = data.default_models[p] || '';
@@ -188,7 +194,7 @@ async function load() {
     const provider = document.getElementById('f-provider').value;
     const apiKey = document.getElementById('f-key').value;
     const result = document.getElementById('result');
-    if (!apiKey) { result.textContent = 'Enter an API key first.'; return; }
+    if (!apiKey && provider !== 'claude_cli') { result.textContent = 'Enter an API key first.'; return; }
     result.textContent = 'Fetching models…';
     try {
       const r = await fetch(`/api/settings/ai/models?provider=${provider}&api_key=${encodeURIComponent(apiKey)}`);
@@ -207,7 +213,7 @@ async function load() {
     const apiKey = document.getElementById('f-key').value;
     const model = document.getElementById('f-model-manual').value || document.getElementById('f-model').value;
     const result = document.getElementById('result');
-    if (!apiKey) { result.textContent = 'Paste an API key first.'; return; }
+    if (!apiKey && provider !== 'claude_cli') { result.textContent = 'Paste an API key first.'; return; }
     if (!model) { result.textContent = 'No model set — open "Advanced" and type one.'; return; }
     result.textContent = 'Saving…';
     try {

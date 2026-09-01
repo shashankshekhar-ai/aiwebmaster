@@ -28,6 +28,11 @@ DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-5",
     "gemini": "gemini-flash-latest",
     "openai": "gpt-4o",
+    # Alias, not a pinned model name — the CLI resolves "haiku"/"sonnet"/
+    # "opus"/"fable" to whatever's current itself. haiku default matches
+    # "low effort" (fast/cheap) being the point of this provider over a
+    # billed API key.
+    "claude_cli": "haiku",
 }
 
 _GEMINI_TYPE_MAP = {
@@ -51,7 +56,17 @@ def _active_config() -> dict[str, str]:
         return {"provider": row["provider"], "model": row["model"], "api_key": row["api_key"]}
 
     provider = settings.ai_provider.lower()
-    key = settings.anthropic_api_key if provider == "anthropic" else settings.gemini_api_key
+    # claude_cli needs no key at all — it authenticates via the claude-agent
+    # sandbox's persisted OAuth login (a Claude subscription), not an API
+    # key. openai previously fell through to gemini_api_key here by mistake
+    # (dead code until openai was actually selected with no DB row) — each
+    # provider now resolves its own key explicitly.
+    key = {
+        "anthropic": settings.anthropic_api_key,
+        "gemini": settings.gemini_api_key,
+        "openai": getattr(settings, "openai_api_key", ""),  # no OPENAI_API_KEY field/env wired up yet — DB-configured key (Settings UI) is the only way to use this provider today
+        "claude_cli": "",
+    }.get(provider, "")
     return {"provider": provider, "model": DEFAULT_MODELS.get(provider, ""), "api_key": key}
 
 
@@ -59,6 +74,10 @@ def list_models(provider: str, api_key: str) -> list[str]:
     """Live model list from the provider's API, falling back to a curated
     static list if the provider has no list-models endpoint reachable here."""
     provider = provider.lower()
+    if provider == "claude_cli":
+        # No key, no list-models API to call — the CLI resolves these
+        # aliases to whatever's current itself.
+        return ["haiku", "sonnet", "opus", "fable"]
     try:
         if provider == "anthropic":
             import anthropic
@@ -111,6 +130,8 @@ def structured_call(
         return _call_gemini(cfg, system_prompt, user_message, tool_name, input_schema, max_tokens)
     if cfg["provider"] == "openai":
         return _call_openai(cfg, system_prompt, user_message, tool_name, tool_description, input_schema, max_tokens)
+    if cfg["provider"] == "claude_cli":
+        return _call_claude_cli(cfg, system_prompt, user_message, tool_name)
     return _call_anthropic(cfg, system_prompt, user_message, tool_name, tool_description, input_schema, max_tokens)
 
 
@@ -156,6 +177,95 @@ def _call_anthropic(
         elif block.type == "tool_use" and block.name == tool_name:
             proposal = block.input
     return {"reply": reply, "proposal": proposal}
+
+
+def _normalize_proposal(tool_name: str, proposal: Any) -> dict[str, Any] | None:
+    """The schema is {tool_name: {"actions": [...]}}, but a provider without
+    real schema enforcement (claude_cli's free-text JSON, no forced tool-use)
+    can reasonably "simplify" that to {tool_name: [...]} directly — confirmed
+    live. run_agent_turn always expects the wrapped shape; normalize here so
+    every _call_* returns the same shape regardless of what the model did."""
+    if isinstance(proposal, list):
+        return {"actions": proposal}
+    return proposal
+
+
+def _strip_json_fences(text: str) -> str:
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else t[3:]
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[: -3]
+    return t.strip()
+
+
+def _call_claude_cli(
+    cfg: dict[str, str],
+    system_prompt: str,
+    user_message: str,
+    tool_name: str,
+) -> dict[str, Any]:
+    """Routes through the `claude-agent` sandbox's persisted Claude Code CLI
+    login (a Claude Pro/Max subscription — see infra/claude-agent/README.md
+    and docker-compose.yml's comment on that service) instead of a billed
+    Anthropic API key. No `structured_call`/forced-tool-use available this
+    way — same technique as _call_gemini: the system prompt requires a bare
+    JSON object with "reply"/tool_name keys, parsed out of the CLI's
+    `--output-format json` result text. Slower than a direct API call (shells
+    out to a fresh `docker compose run`) and NOT free — the CLI reports a
+    real total_cost_usd per call even though it's covered by the
+    subscription's included usage rather than billed separately; it just
+    doesn't consume the AI provider's own $ budget the way an API key would.
+    """
+    import subprocess
+
+    from core.config import settings
+
+    model = cfg["model"] or DEFAULT_MODELS["claude_cli"]
+    json_system_prompt = (
+        f"{system_prompt}\n\nAlways respond with ONLY a raw JSON object (no markdown fences, no prose "
+        f'outside the JSON) having two top-level keys: "reply" (your conversational text) and '
+        f'"{tool_name}" (the complete proposed actions list if you\'re proposing changes, or null if '
+        "you're just answering a question)."
+    )
+    cmd = [
+        "docker", "compose", "-f", f"{settings.repo_path}/docker-compose.yml",
+        "--project-directory", settings.host_repo_path,
+        "-p", settings.compose_project, "run", "--rm", "-T",
+        "-e", "QUERY_MODE=1",
+        "-e", f"QUERY_MODEL={model}",
+        "-e", "QUERY_EFFORT=low",
+        "-e", f"QUERY_SYSTEM_PROMPT={json_system_prompt}",
+        "claude-agent", user_message,
+    ]
+    try:
+        result = subprocess.run(cmd, cwd=settings.repo_path, capture_output=True, text=True, timeout=120, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise AIProviderError("claude-agent CLI call timed out after 120s") from exc
+    if result.returncode != 0:
+        raise AIProviderError(f"claude-agent CLI call failed (exit {result.returncode}): {result.stderr[-500:] or result.stdout[-500:]}")
+
+    try:
+        wrapper = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AIProviderError(f"claude-agent CLI returned non-JSON output: {exc}") from exc
+    if wrapper.get("is_error"):
+        raise AIProviderError(f"claude-agent CLI reported an error: {wrapper.get('result', '')[:300]}")
+
+    _log_usage_safe(
+        provider="claude_cli",
+        model=model,
+        input_tokens=(wrapper.get("usage") or {}).get("input_tokens", 0),
+        output_tokens=(wrapper.get("usage") or {}).get("output_tokens", 0),
+    )
+
+    raw_text = _strip_json_fences(wrapper.get("result", ""))
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise AIProviderError(f"claude-agent response was not valid JSON: {exc}") from exc
+
+    return {"reply": parsed.get("reply", ""), "proposal": _normalize_proposal(tool_name, parsed.get(tool_name))}
 
 
 def _call_openai(
@@ -269,4 +379,4 @@ def _call_gemini(
     except json.JSONDecodeError as exc:
         raise AIProviderError(f"Gemini response was not valid JSON: {exc}") from exc
 
-    return {"reply": parsed.get("reply", ""), "proposal": parsed.get(tool_name)}
+    return {"reply": parsed.get("reply", ""), "proposal": _normalize_proposal(tool_name, parsed.get(tool_name))}

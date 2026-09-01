@@ -42,8 +42,10 @@ def set_ai_settings(body: dict, request: Request) -> dict:
     _require_settings_admin(request)
     provider = body.get("provider")
     model = body.get("model")
-    api_key = body.get("api_key")
-    if provider not in PROVIDERS or not model or not api_key:
+    # claude_cli needs no key — it authenticates via the claude-agent
+    # sandbox's own persisted subscription login, not a per-request key.
+    api_key = body.get("api_key") if provider != "claude_cli" else ""
+    if provider not in PROVIDERS or not model or (provider != "claude_cli" and not api_key):
         raise HTTPException(status_code=400, detail=f"provider (one of {sorted(PROVIDERS)}), model, and api_key are required")
     save_ai_settings(provider=provider, model=model, api_key=api_key)
     return {"ok": True}
