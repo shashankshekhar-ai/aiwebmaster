@@ -135,24 +135,33 @@ def run_agent_turn(history: list[dict[str, str]], role: str) -> dict[str, Any]:
     if context:
         conversation = f"{context}\n\n---\n\n{conversation}"
     allowed_types = set(_proposable_types_for_role(role))
+    call_kwargs = dict(
+        system_prompt=_SYSTEM_PROMPT,
+        user_message=conversation,
+        tool_name=_TOOL_NAME,
+        tool_description=_TOOL_DESCRIPTION,
+        input_schema=_propose_actions_schema_for_role(role),
+        # Default (2048) was sized before page context included full block
+        # JSON — a content action on kind:page is now instructed to echo
+        # back the COMPLETE existing blocks array (see system prompt),
+        # which can genuinely exceed 2048 tokens for a page with a few
+        # blocks and truncates mid-JSON, producing exactly the "Expecting
+        # value" JSONDecodeError seen live. Confirmed via the 503s in the
+        # logs correlating with this context change.
+        max_tokens=8192,
+    )
     try:
-        result = structured_call(
-            system_prompt=_SYSTEM_PROMPT,
-            user_message=conversation,
-            tool_name=_TOOL_NAME,
-            tool_description=_TOOL_DESCRIPTION,
-            input_schema=_propose_actions_schema_for_role(role),
-            # Default (2048) was sized before page context included full
-            # block JSON — a content action on kind:page is now instructed
-            # to echo back the COMPLETE existing blocks array (see system
-            # prompt), which can genuinely exceed 2048 tokens for a page
-            # with a few blocks and truncates mid-JSON, producing exactly
-            # the "Expecting value" JSONDecodeError seen live. Confirmed via
-            # the 503s in the logs correlating with this context change.
-            max_tokens=8192,
-        )
-    except AIProviderError as exc:
-        raise AIwebmasterError(str(exc)) from exc
+        result = structured_call(**call_kwargs)
+    except AIProviderError:
+        # One silent retry — a transient truncation (model ran long on a
+        # complex proposal) or a momentary network/API hiccup both self-
+        # resolve on a fresh attempt often enough that surfacing every
+        # single one to the user isn't worth it. Still raises on a second
+        # failure — this is not a masking loop, just one free retry.
+        try:
+            result = structured_call(**call_kwargs)
+        except AIProviderError as exc:
+            raise AIwebmasterError(str(exc)) from exc
 
     raw_actions = (result.get("proposal") or {}).get("actions", []) if result.get("proposal") else []
     actions = []
