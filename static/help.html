@@ -15,7 +15,7 @@
 <div id="page-content" class="relative z-10 flex-1 flex flex-col min-w-0 overflow-hidden h-screen">
   <header class="px-6 py-4 border-b border-brand-border bg-brand-navy/60 backdrop-blur animate-fade-in">
     <h1 class="text-sm font-semibold">Help</h1>
-    <p class="text-xs text-brand-muted mt-0.5">Every task this app can do — where to do it, and how. Grayed-out cases need a role you don't have.</p>
+    <p class="text-xs text-brand-muted mt-0.5">What you can do, how to do it, and when to ask for help. No coding needed.</p>
   </header>
   <div id="content" class="flex-1 overflow-y-auto p-6"></div>
 </div>
@@ -28,6 +28,20 @@
 // payload-level restriction (auth/permissions.py DOCKER_STAGING_ROLES), not
 // a plain action-type one. Kept in one flat list, data-driven, so a new
 // action type just means one more entry here instead of new prose.
+// Kept in sync by hand with static/index.html's EXAMPLE_PROMPTS_BY_ROLE.ui_editor
+// — same wording in both places, so what you see here is exactly what
+// works if you paste it into Chat. If you add/change one, update the other.
+const QUICK_START_PROMPTS = [
+  { text: 'Add a new blog post about our latest workshop', note: 'Creates a draft — say "publish it" if you want it live right away.' },
+  { text: 'Create a new page called Services with a short intro paragraph', note: 'You can describe what the page should say in plain language.' },
+  { text: 'Update the homepage navigation to add a "Resources" link', note: 'Nav changes go live immediately, no draft step.' },
+  { text: 'Remove the "Careers" link from the footer', note: '' },
+  { text: 'Change the case study client name for the manufacturing example', note: '' },
+  { text: 'Add a new FAQ: question and answer about pricing', note: '' },
+  { text: 'Add a testimonial from a client, with their name and quote', note: '' },
+  { text: 'Upload this image as our new team photo: <paste image URL>', note: 'Replace the <...> with a real image link — there\'s no upload-from-your-computer button yet, only from a URL.' },
+];
+
 const CASES = [
   { cat: 'Content', title: 'Edit a page, post, resource, or case study', where: 'Browse & edit', access: 'content',
     steps: [
@@ -140,10 +154,40 @@ async function init() {
   let delay = 0;
   document.getElementById('content').innerHTML = `
     <div class="max-w-3xl">
+
       <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up mb-6">
-        <div class="text-sm text-brand-ink font-semibold mb-1">The rule everywhere in this app</div>
-        <div class="text-sm text-brand-muted leading-relaxed">You describe what you want (or click a button), AIwebmaster shows a <b class="text-brand-ink">proposed action card</b> with a plain-English summary, and <b class="text-brand-ink">nothing happens until you click Run</b>. "Show details" on any card reveals exactly what will execute first.</div>
+        <div class="text-sm text-brand-ink font-semibold mb-1">How this works, in plain terms</div>
+        <div class="text-sm text-brand-muted leading-relaxed">Go to <b class="text-brand-ink">Chat</b> and type what you want changed, in your own words — no special format needed. AIwebmaster shows you a <b class="text-brand-ink">proposed change</b> with a plain-English summary of exactly what it's about to do. <b class="text-brand-ink">Nothing happens until you click Run</b> on that card. You can always click "Show details" to see the raw specifics first.</div>
       </div>
+
+      <div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up mb-6" style="animation-delay:30ms">
+        <div class="text-sm text-brand-ink font-semibold mb-1">Quick start — type one of these into Chat</div>
+        <div class="text-xs text-brand-muted mb-4">Copy one, paste it into the Chat box, and adjust the details (names, dates, exact wording) to what you actually need.</div>
+        <div class="space-y-2.5">
+          ${QUICK_START_PROMPTS.map((p, i) => `
+            <div class="flex items-start gap-3 bg-brand-navy2/60 border border-brand-border/70 rounded-lg p-3">
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-brand-ink font-mono">"${p.text}"</div>
+                ${p.note ? `<div class="text-[11px] text-brand-muted mt-1">${p.note}</div>` : ''}
+              </div>
+              <button data-copy-prompt="${i}" class="shrink-0 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-brand-panel2 border border-brand-border text-brand-ink transition-all hover:border-brand-gold">Copy</button>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <div class="bg-brand-terracotta/10 border border-brand-terracotta/30 rounded-xl p-5 shadow-panel animate-fade-in-up mb-8" style="animation-delay:60ms">
+        <div class="text-sm text-brand-ink font-semibold mb-1">When to contact the site admin instead of trying it yourself</div>
+        <div class="text-sm text-brand-muted leading-relaxed mb-2">Reach out to <a href="mailto:admin@thebradburygroup.net" class="text-brand-teal hover:text-brand-gold underline">admin@thebradburygroup.net</a> if:</div>
+        <ul class="text-sm text-brand-muted leading-relaxed list-disc list-inside space-y-1">
+          <li>You want to change something on the <b class="text-brand-ink">homepage</b> — its layout is custom-built, not something a content change can touch.</li>
+          <li>A card in the sidebar is grayed out / marked "locked — ask an admin" below — that means your account doesn't have that permission.</li>
+          <li>You ran something and clicked Run, but the change still isn't showing up on the live site after a few minutes.</li>
+          <li>You need something technical — a code change beyond simple text, a database change, a deploy to staging, or a new user account.</li>
+          <li>Anything about this feels uncertain and you'd rather double-check before clicking Run on something that can't be easily undone.</li>
+        </ul>
+      </div>
+
+      <div class="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-brand-muted">Full reference — every task this app can do</div>
       ${cats.map(cat => `
         <div class="mb-2 mt-6 first:mt-0 px-1 text-[11px] font-bold uppercase tracking-wider text-brand-muted">${cat}</div>
         <div class="grid grid-cols-1 gap-4">
@@ -151,6 +195,20 @@ async function init() {
         </div>
       `).join('')}
     </div>`;
+
+  document.querySelectorAll('[data-copy-prompt]').forEach(btn => {
+    btn.onclick = async () => {
+      const p = QUICK_START_PROMPTS[Number(btn.dataset.copyPrompt)];
+      try {
+        await navigator.clipboard.writeText(p.text);
+        const original = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = original; }, 1500);
+      } catch (e) {
+        alert('Could not copy — select and copy the text manually.');
+      }
+    };
+  });
 }
 init();
 </script>

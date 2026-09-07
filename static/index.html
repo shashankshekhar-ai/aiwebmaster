@@ -262,11 +262,19 @@ async function init() {
 }
 init();
 
+// Kept in sync by hand with the "type this" examples on the Help page
+// (static/help.html's QUICK_START_PROMPTS) — same wording in both places so
+// a non-technical user sees one consistent set of examples, not two.
 const EXAMPLE_PROMPTS_BY_ROLE = {
   ui_editor: [
     'Add a new blog post about our latest workshop',
+    'Create a new page called Services with a short intro paragraph',
     'Update the homepage navigation to add a "Resources" link',
+    'Remove the "Careers" link from the footer',
     'Change the case study client name for the manufacturing example',
+    'Add a new FAQ: question and answer about pricing',
+    'Add a testimonial from a client, with their name and quote',
+    'Upload this image as our new team photo: <paste image URL>',
   ],
   docker_ops: ['Rebuild and restart the cms service on dev', 'Check if the API service is running'],
   infra_admin: ['Show me recent git changes', 'Rebuild the web service after a code change'],
