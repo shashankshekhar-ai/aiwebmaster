@@ -73,12 +73,22 @@ def run_action(body: dict, request: Request) -> dict:
         result = {"error": str(exc)}
         ok = False
 
+    # The executor already ran with the real payload above — this redacted
+    # copy is only for what gets persisted to the audit trail. A raw
+    # password (create/update account, reset password) has no business
+    # sitting in plaintext in a table other admins/infra_admin (sql
+    # permission) can query indefinitely; every other field is left as-is
+    # since the audit trail's whole point is showing exactly what ran.
+    audit_payload = dict(payload)
+    if "password" in audit_payload:
+        audit_payload["password"] = "***REDACTED***"
+
     log_event(
         event="executed",
         actor=request.state.user["email"],
         action_type=action_type,
         action_id=action_id,
-        payload=payload,
+        payload=audit_payload,
         result=result,
         ok=ok,
     )
