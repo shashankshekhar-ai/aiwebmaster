@@ -32,14 +32,14 @@
 // — same wording in both places, so what you see here is exactly what
 // works if you paste it into Chat. If you add/change one, update the other.
 const QUICK_START_PROMPTS = [
-  { text: 'Add a new blog post about our latest workshop', note: 'Creates a draft — say "publish it" if you want it live right away.' },
-  { text: 'Create a new page called Services with a short intro paragraph', note: 'You can describe what the page should say in plain language.' },
-  { text: 'Update the homepage navigation to add a "Resources" link', note: 'Nav changes go live immediately, no draft step.' },
-  { text: 'Remove the "Careers" link from the footer', note: '' },
-  { text: 'Change the case study client name for the manufacturing example', note: '' },
-  { text: 'Add a new FAQ: question and answer about pricing', note: '' },
-  { text: 'Add a testimonial from a client, with their name and quote', note: '' },
-  { text: 'Upload this image as our new team photo: <paste image URL>', note: 'Replace the <...> with a real image link — there\'s no upload-from-your-computer button yet, only from a URL.' },
+  { text: 'Add a new blog post about our latest workshop', note: 'Creates a draft — say "publish it" if you want it live right away.', access: 'content' },
+  { text: 'Create a new page called Services with a short intro paragraph', note: 'You can describe what the page should say in plain language.', access: 'content' },
+  { text: 'Update the homepage navigation to add a "Resources" link', note: 'Nav changes go live immediately, no draft step.', access: 'nav_link' },
+  { text: 'Remove the "Careers" link from the footer', note: '', access: 'nav_link' },
+  { text: 'Change the case study client name for the manufacturing example', note: '', access: 'content' },
+  { text: 'Add a new FAQ: question and answer about pricing', note: '', access: 'content' },
+  { text: 'Add a testimonial from a client, with their name and quote', note: '', access: 'content' },
+  { text: 'Upload this image as our new team photo: <paste image URL>', note: 'Replace the <...> with a real image link — there\'s no upload-from-your-computer button yet, only from a URL.', access: 'media' },
 ];
 
 const CASES = [
@@ -164,14 +164,17 @@ async function init() {
         <div class="text-sm text-brand-ink font-semibold mb-1">Quick start — type one of these into Chat</div>
         <div class="text-xs text-brand-muted mb-4">Copy one, paste it into the Chat box, and adjust the details (names, dates, exact wording) to what you actually need.</div>
         <div class="space-y-2.5">
-          ${QUICK_START_PROMPTS.map((p, i) => `
+          ${QUICK_START_PROMPTS.map((p, i) => { const allowed = canRun(me, p.access); return `
             <div class="flex items-start gap-3 bg-brand-navy2/60 border border-brand-border/70 rounded-lg p-3">
               <div class="flex-1 min-w-0">
-                <div class="text-sm text-brand-ink font-mono">"${p.text}"</div>
+                <div class="flex items-start justify-between gap-3 mb-1">
+                  <div class="text-sm text-brand-ink font-mono">"${p.text}"</div>
+                  <span class="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${allowed ? 'bg-brand-teal/15 text-brand-teal' : 'bg-brand-terracotta/15 text-brand-terracotta'}">${allowed ? 'available to you' : 'locked — ask an admin'}</span>
+                </div>
                 ${p.note ? `<div class="text-[11px] text-brand-muted mt-1">${p.note}</div>` : ''}
               </div>
               <button data-copy-prompt="${i}" class="shrink-0 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-brand-panel2 border border-brand-border text-brand-ink transition-all hover:border-brand-gold">Copy</button>
-            </div>`).join('')}
+            </div>`; }).join('')}
         </div>
       </div>
 
