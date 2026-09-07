@@ -114,6 +114,14 @@ proposed copy — this firm's tone is confident and concrete, not salesy.
 
 ## Known unwired areas (as of this session)
 
+- The `case-studies` CMS collection has NO public page anywhere on the
+  site (confirmed by testing — a real create succeeds and shows
+  `status: "published"` correctly, but 404s forever). "Case Studies" on
+  the live site is actually a filtered section of `/resources`
+  (`resourceType: "case-study"` within the `resources` collection, a
+  different collection entirely). Never propose `kind: "case-study"` —
+  the system prompt already redirects this to `kind: "resource"` with
+  `resourceType: "case-study"` instead.
 - The header logo (`apps/web/components/layout/HeaderNav.tsx`) is a hardcoded
   `<Image src="/brand/White-Monochrome-Text.png">`, NOT read from
   `SiteSettings.logo` in the CMS (that field exists but nothing renders it).
