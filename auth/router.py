@@ -63,6 +63,8 @@ def login(body: dict, response: Response) -> dict:
     if not user or not verify_password(password, user["password_hash"]):
         record_failure(email)
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user["enabled"]:
+        raise HTTPException(status_code=403, detail="This account has been disabled.")
     clear(email)
     touch_last_login(user["id"])
 
@@ -119,6 +121,8 @@ def auth0_callback(
     user = get_user_by_email(email)
     if not user:
         return RedirectResponse("/login?error=no_account_for_this_email")
+    if not user["enabled"]:
+        return RedirectResponse("/login?error=account_disabled")
 
     resp = RedirectResponse("/")
     resp.delete_cookie(_STATE_COOKIE, path="/api/auth/auth0")

@@ -42,6 +42,17 @@ def run_action(body: dict, request: Request) -> dict:
     except PermissionDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    # user_management's set_enabled/reset_password ops act on another
+    # account's login gate/credentials — never allow targeting your own id
+    # here (locking yourself out, or resetting your own password blind and
+    # losing the generated value, both self-inflicted and unrecoverable
+    # without a second super_admin). Checked with the acting user's real id
+    # from the session, not anything client-supplied, so this can't be
+    # bypassed by a crafted request body.
+    if action_type == "user_management" and payload.get("op") in ("set_enabled", "reset_password"):
+        if payload.get("user_id") == request.state.user["id"]:
+            raise HTTPException(status_code=400, detail="You can't change your own account status or password here.")
+
     if action_type == "codegen_agent":
         retry_after = codegen_limiter.check(request.state.user["id"])
         if retry_after is not None:

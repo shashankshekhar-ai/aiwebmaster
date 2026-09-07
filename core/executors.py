@@ -371,8 +371,35 @@ def call_nav_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_user_management(payload: dict[str, Any]) -> dict[str, Any]:
-    from auth.models import ROLES, create_user
+    from auth.models import ROLES, create_user, set_user_enabled, set_user_password
     from auth.passwords import hash_password
+
+    op = payload.get("op", "upsert")
+
+    if op == "set_enabled":
+        # Self-target is blocked one layer up, in routers/actions.py, where
+        # the acting user's own id (from the session, not client-supplied)
+        # is available — this executor has no request context of its own.
+        user_id = payload.get("user_id")
+        enabled = payload.get("enabled")
+        if not isinstance(user_id, int) or not isinstance(enabled, bool):
+            raise ExecutionError("set_enabled requires user_id (int) and enabled (bool)")
+        user = set_user_enabled(user_id, enabled)
+        if not user:
+            raise ExecutionError(f"No user with id {user_id}")
+        return {"ok": True, "user": user}
+
+    if op == "reset_password":
+        user_id = payload.get("user_id")
+        password = payload.get("password")
+        if not isinstance(user_id, int):
+            raise ExecutionError("reset_password requires user_id (int)")
+        if not password:
+            raise ExecutionError("reset_password requires a password")
+        user = set_user_password(user_id, hash_password(password))
+        if not user:
+            raise ExecutionError(f"No user with id {user_id}")
+        return {"ok": True, "user": user}
 
     email = payload.get("email")
     role = payload.get("role")

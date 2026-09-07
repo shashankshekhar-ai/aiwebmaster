@@ -68,12 +68,16 @@ async function load() {
 
   const STATUS_COLORS = { active: '#3fa39a', inactive: '#8ba3b6' };
 
-  const rows = data.users.map((u, i) => `
+  const ACCOUNT_COLORS = { enabled: '#3fa39a', disabled: '#c1503f' };
+
+  const rows = data.users.map((u, i) => {
+    const isSelf = u.email === me.email;
+    return `
     <tr class="border-b border-brand-border/60 hover:bg-brand-panel/60 transition-colors animate-fade-in" style="animation-delay:${i*30}ms">
       <td class="py-3 px-4">
         <div class="flex items-center gap-2.5">
           <div class="w-7 h-7 rounded-full bg-brand-panel2 border border-brand-border flex items-center justify-center text-[10px] font-bold" style="color:${ROLE_COLORS[u.role]}">${u.email[0].toUpperCase()}</div>
-          <span class="text-sm">${u.email}</span>
+          <span class="text-sm">${u.email}${isSelf ? ' <span class="text-brand-muted text-[10px]">(you)</span>' : ''}</span>
         </div>
       </td>
       <td class="py-3 px-4"><span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full" style="background:${ROLE_COLORS[u.role]}22;color:${ROLE_COLORS[u.role]}">
@@ -82,9 +86,23 @@ async function load() {
       <td class="py-3 px-4"><span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full" style="background:${STATUS_COLORS[u.active ? 'active' : 'inactive']}22;color:${STATUS_COLORS[u.active ? 'active' : 'inactive']}">
         <span class="w-1.5 h-1.5 rounded-full" style="background:${STATUS_COLORS[u.active ? 'active' : 'inactive']}"></span>${u.active ? 'Active' : 'Inactive'}
       </span></td>
+      <td class="py-3 px-4">
+        <button
+          ${isSelf ? 'disabled title="You can\'t change your own account status."' : `data-toggle-status="${u.id}" data-enabled="${u.enabled}" title="Click to ${u.enabled ? 'disable' : 'enable'} this account"`}
+          class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full transition-all ${isSelf ? 'opacity-50 cursor-not-allowed' : 'hover:brightness-110 cursor-pointer'}"
+          style="background:${ACCOUNT_COLORS[u.enabled ? 'enabled' : 'disabled']}22;color:${ACCOUNT_COLORS[u.enabled ? 'enabled' : 'disabled']}">
+          <span class="w-1.5 h-1.5 rounded-full" style="background:${ACCOUNT_COLORS[u.enabled ? 'enabled' : 'disabled']}"></span>${u.enabled ? 'Enabled' : 'Disabled'}
+        </button>
+      </td>
       <td class="py-3 px-4 text-xs text-brand-muted">${u.last_login_at ? u.last_login_at.slice(0,10) : 'Never'}</td>
       <td class="py-3 px-4 text-xs text-brand-muted">${u.created_at.slice(0,10)}</td>
-    </tr>`).join('');
+      <td class="py-3 px-4">
+        ${isSelf
+          ? `<span class="text-xs text-brand-muted opacity-50" title="You can't reset your own password here.">Reset password</span>`
+          : `<button data-reset-password="${u.id}" data-email="${u.email}" class="text-xs font-medium text-brand-teal hover:text-brand-gold transition-colors">Reset password</button>`}
+      </td>
+    </tr>`;
+  }).join('');
 
   const options = data.roles.map(r => `<option value="${r}">${r}</option>`).join('');
 
@@ -117,7 +135,7 @@ async function load() {
         <div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up">
           <table class="w-full text-left">
             <thead><tr class="border-b border-brand-border text-[11px] uppercase tracking-wider text-brand-muted">
-              <th class="py-3 px-4 font-semibold">Email</th><th class="py-3 px-4 font-semibold">Role</th><th class="py-3 px-4 font-semibold">Status</th><th class="py-3 px-4 font-semibold">Last login</th><th class="py-3 px-4 font-semibold">Created</th>
+              <th class="py-3 px-4 font-semibold">Email</th><th class="py-3 px-4 font-semibold">Role</th><th class="py-3 px-4 font-semibold">Status</th><th class="py-3 px-4 font-semibold">Account</th><th class="py-3 px-4 font-semibold">Last login</th><th class="py-3 px-4 font-semibold">Created</th><th class="py-3 px-4 font-semibold"></th>
             </tr></thead>
             <tbody>${rows}</tbody>
           </table>
@@ -165,6 +183,50 @@ async function load() {
     field.value = genPassword();
     document.getElementById('gen-hint').textContent = 'Generated — copy it now, it won\'t be shown again after you save.';
   };
+
+  content.querySelectorAll('[data-toggle-status]').forEach(btn => {
+    btn.onclick = async () => {
+      const userId = Number(btn.dataset.toggleStatus);
+      const currentlyEnabled = btn.dataset.enabled === 'true';
+      const nextEnabled = !currentlyEnabled;
+      if (nextEnabled === false && !confirm(`Disable this account? They'll be signed out immediately and unable to log in until re-enabled.`)) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/actions/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'user-status-' + Date.now(), type: 'user_management', payload: { op: 'set_enabled', user_id: userId, enabled: nextEnabled } }),
+        });
+        if (!res.ok) { const err = await res.json(); alert(typeof err.detail === 'string' ? err.detail : JSON.stringify(err)); btn.disabled = false; return; }
+        load();
+      } catch (e) {
+        alert(String(e));
+        btn.disabled = false;
+      }
+    };
+  });
+
+  content.querySelectorAll('[data-reset-password]').forEach(btn => {
+    btn.onclick = async () => {
+      const userId = Number(btn.dataset.resetPassword);
+      const email = btn.dataset.email;
+      const newPassword = genPassword();
+      if (!confirm(`Reset the password for ${email}? This signs them out of any current session immediately.`)) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/actions/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'user-reset-' + Date.now(), type: 'user_management', payload: { op: 'reset_password', user_id: userId, password: newPassword } }),
+        });
+        if (!res.ok) { const err = await res.json(); alert(typeof err.detail === 'string' ? err.detail : JSON.stringify(err)); btn.disabled = false; return; }
+        prompt(`New password for ${email} — copy it now, it won't be shown again:`, newPassword);
+      } catch (e) {
+        alert(String(e));
+      }
+      btn.disabled = false;
+    };
+  });
 
   document.getElementById('f-submit').onclick = async () => {
     const email = document.getElementById('f-email').value;

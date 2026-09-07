@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS aiwebmaster_users (
 );
 ALTER TABLE aiwebmaster_users ADD COLUMN IF NOT EXISTS session_epoch INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE aiwebmaster_users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+ALTER TABLE aiwebmaster_users ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
 """
 
 # A user counts as "active" if they've logged in within this many days —
@@ -84,11 +85,58 @@ def get_user_by_email(email: str) -> dict[str, Any] | None:
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT id, email, password_hash, role, session_epoch FROM aiwebmaster_users WHERE email = %s",
+                "SELECT id, email, password_hash, role, session_epoch, enabled FROM aiwebmaster_users WHERE email = %s",
                 (email,),
             )
             row = cur.fetchone()
             return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def set_user_enabled(user_id: int, enabled: bool) -> dict[str, Any]:
+    """Toggles the real account-status gate checked at login (auth/router.py).
+    Disabling also bumps session_epoch, signing the user out of any session
+    they're currently in immediately — same revocation mechanism as a
+    password reset (auth/deps.py::require_session compares epochs on every
+    request). Enabling doesn't need to bump it — there's no live session to
+    invalidate for an already-disabled account."""
+    conn = psycopg2.connect(settings.api_database_url)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if enabled:
+                cur.execute(
+                    "UPDATE aiwebmaster_users SET enabled = true WHERE id = %s RETURNING id, email, role, enabled",
+                    (user_id,),
+                )
+            else:
+                cur.execute(
+                    """UPDATE aiwebmaster_users SET enabled = false, session_epoch = session_epoch + 1
+                       WHERE id = %s RETURNING id, email, role, enabled""",
+                    (user_id,),
+                )
+            row = cur.fetchone()
+        conn.commit()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def set_user_password(user_id: int, password_hash: str) -> dict[str, Any]:
+    """Same session_epoch-bump revocation as create_user's password path,
+    for the per-row 'reset password' button (target already has an id, no
+    need to go through the upsert-by-email path)."""
+    conn = psycopg2.connect(settings.api_database_url)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """UPDATE aiwebmaster_users SET password_hash = %s, session_epoch = session_epoch + 1
+                   WHERE id = %s RETURNING id, email, role""",
+                (password_hash, user_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return dict(row) if row else None
     finally:
         conn.close()
 
@@ -108,7 +156,7 @@ def list_users() -> list[dict[str, Any]]:
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                """SELECT id, email, role, created_at, last_login_at,
+                """SELECT id, email, role, created_at, last_login_at, enabled,
                           (last_login_at IS NOT NULL AND last_login_at > now() - interval '%s days') AS active
                    FROM aiwebmaster_users ORDER BY created_at""",
                 (_ACTIVE_WINDOW_DAYS,),
