@@ -36,10 +36,11 @@ const QUICK_START_PROMPTS = [
   { text: 'Create a new page called Services with a short intro paragraph', note: 'You can describe what the page should say in plain language.', access: 'content' },
   { text: 'Update the homepage navigation to add a "Resources" link', note: 'Nav changes go live immediately, no draft step.', access: 'nav_link' },
   { text: 'Remove the "Careers" link from the footer', note: '', access: 'nav_link' },
-  { text: 'Change the case study client name for the manufacturing example', note: '', access: 'content' },
+  { text: 'Change the case study client name for the manufacturing example', note: '"Case studies" live under Resources, not a separate section — the assistant handles this automatically.', access: 'content' },
   { text: 'Add a new FAQ: question and answer about pricing', note: '', access: 'content' },
   { text: 'Add a testimonial from a client, with their name and quote', note: '', access: 'content' },
   { text: 'Upload this image as our new team photo: <paste image URL>', note: 'Replace the <...> with a real image link — there\'s no upload-from-your-computer button yet, only from a URL.', access: 'media' },
+  { text: 'Delete the blog post titled "Old Announcement"', note: 'Permanent, no undo — say the exact title so there\'s no ambiguity about which one.', access: 'content' },
 ];
 
 const CASES = [
@@ -49,6 +50,12 @@ const CASES = [
       'Either edit the fields directly and Save, or click through to Chat with the item pre-loaded and describe the change in plain English.',
       'Review the proposed <b class="text-brand-ink">content</b> action card, then click <b class="text-brand-ink">Run</b>.',
       'Saved as a <b class="text-brand-ink">draft</b> by default — say "publish it" in Chat if you want it live immediately.',
+    ] },
+  { cat: 'Content', title: 'Delete a page, post, resource, FAQ, or testimonial', where: 'Chat', access: 'content',
+    steps: [
+      'Describe exactly what to delete in Chat, by name — e.g. "delete the FAQ about pricing".',
+      'Review the proposed <b class="text-brand-ink">content</b> (delete) card carefully, then click <b class="text-brand-ink">Run</b>.',
+      'Permanent — these collections don\'t soft-delete, there is no undo and no trash/recycle bin.',
     ] },
   { cat: 'Content', title: 'Add, update, or remove a nav link', where: 'Browse & edit → Navigation, or Chat', access: 'nav_link',
     steps: [
@@ -108,6 +115,13 @@ const CASES = [
     steps: [
       'Open <b class="text-brand-ink">Users</b>, click "+ Add user" (or edit an existing one), set their role.',
       'Roles and what each can do are listed on that page.',
+    ] },
+  { cat: 'Admin — system', title: "Enable/disable a user's account, or reset their password", where: 'Users page', access: 'user_management',
+    steps: [
+      'Open <b class="text-brand-ink">Users</b> — each row (except your own) has an Enabled/Disabled toggle and a Reset password button.',
+      'Disabling signs that person out immediately and blocks them from logging back in until re-enabled.',
+      'Reset password generates a new one and shows it once — copy it before closing, it won\'t be shown again.',
+      'You can\'t do either of these to your own account, on purpose — asks you to have another super_admin do it instead.',
     ] },
   { cat: 'Admin — system', title: "Change the AI provider or API key chat uses", where: 'Settings page', access: 'user_management',
     steps: [
