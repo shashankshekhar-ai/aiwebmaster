@@ -275,6 +275,25 @@ def call_content_agent(payload: dict[str, Any]) -> dict[str, Any]:
         raise ExecutionError(
             "content action requires kind: page|post|resource|case-study|faq|testimonial"
         )
+
+    if payload.get("delete"):
+        # Delete is its own branch, checked before the fields/'proposal'
+        # validation below — a delete request has no fields to send, just
+        # the docId of what to remove. Permanent: the CMS collections here
+        # don't soft-delete, this is a real row gone.
+        if not doc_id:
+            raise ExecutionError("content delete requires docId")
+        url = (
+            f"{settings.cms_url}/api/page-agent/apply"
+            if kind == "page"
+            else f"{settings.cms_url}/api/content-agent/apply"
+        )
+        body = {"pageId": doc_id, "delete": True} if kind == "page" else {"kind": kind, "docId": doc_id, "delete": True}
+        resp = httpx.post(url, json=body, headers=_cms_headers(), timeout=30)
+        if resp.status_code >= 400:
+            raise ExecutionError(f"CMS content delete failed ({resp.status_code}): {resp.text[:500]}")
+        return resp.json()
+
     if not isinstance(fields, dict):
         raise ExecutionError("content action requires a 'fields' object")
     publish = payload.get("publish", True)
