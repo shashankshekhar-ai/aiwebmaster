@@ -55,6 +55,51 @@ proposed copy — this firm's tone is confident and concrete, not salesy.
   already know a file's real content, ask the human to `/read` it into the
   conversation first rather than guessing.
 
+## Operational facts learned from real end-to-end testing (this session)
+
+- Domain migrated `.com` -> `.net` (`thebradburygroup.net`). Public
+  aiwebmaster URL: `https://webmaster.thebradburygroup.net`.
+- Docker compose project name is `tbz`, not `rewamped-site` — always
+  `docker compose -p tbz ...`. aiwebmaster itself is bind-mounted at
+  `127.0.0.1:8001` (not 8110 — that port number appears in older docs,
+  outdated).
+- Chat's `claude_cli` provider must run `model: sonnet`, not `haiku` —
+  confirmed by direct testing that haiku frequently narrates a plan in
+  plain text instead of emitting the JSON `actions` array, even though the
+  system prompt requires JSON-only output. Root cause was actually
+  `infra/claude-agent/run.sh`'s `QUERY_MODE=1` block running with
+  `--permission-mode plan` (fixed — now `bypassPermissions`, since that
+  call exposes no file/bash tools to gate in the first place), but keep
+  `sonnet` as the configured model regardless — haiku is measurably less
+  reliable at the JSON contract even after that fix.
+- `codex-agent` sandbox is not logged in (confirmed) but `core/
+  codegen_router.py::route_codegen` always returns `"claude"` regardless
+  of input — this is dead code, not a live gap. Don't waste time getting
+  codex-agent logged in unless the router is deliberately changed back to
+  per-task routing.
+- `user_management` action type now supports `op: "set_enabled"` (payload
+  `{user_id, enabled}`) and `op: "reset_password"` (payload `{user_id,
+  password}`), in addition to the original upsert-by-email shape (no
+  `op`, or `op: "upsert"`). Both new ops refuse a `user_id` matching the
+  acting user's own id (checked in `routers/actions.py` against the real
+  session, not client input) — a super_admin can't disable or reset their
+  own account this way. Disabling immediately bumps `session_epoch`,
+  killing any live session for that account (confirmed).
+- `aiwebmaster_audit`'s stored `payload` redacts the `password` key
+  (`routers/actions.py`, since <this session>) — never assume a password
+  is recoverable from audit history, and never propose an `sql` action
+  that would try to read one back out of it (it's an intentional dead
+  end).
+- Media upload (`media` action) failed for real with `EACCES: permission
+  denied, mkdir 'media'` from the cms container — root cause was
+  `apps/cms/Dockerfile`'s `WORKDIR` being root-owned with no `--chown` on
+  the directory itself (only on files explicitly `COPY`'d in), so the
+  non-root `payload` user could write into existing folders but not
+  create a new one at runtime. Fixed by creating+chowning `media/` in the
+  Dockerfile before `USER payload`. If a similar "works for existing
+  files, fails to create something new" error shows up in `web` or `api`
+  containers, check the same class of bug there first.
+
 ## Known unwired areas (as of this session)
 
 - The header logo (`apps/web/components/layout/HeaderNav.tsx`) is a hardcoded
