@@ -117,7 +117,7 @@ async function loadEditContext() {
     editContext = { kind, contentKind, docId: String(id) };
     const DRAFT_SUPPORTED = { pages: true, posts: true, 'case-studies': true };
     const historyNote = DRAFT_SUPPORTED[kind]
-      ? ` I'll save changes as a draft by default (won't touch the live version) unless you say to publish — full version history is in the CMS admin: https://cms.thebradburygroup.com/admin/collections/${kind}/${id}.`
+      ? ` I'll save changes as a draft by default (won't touch the live version) unless you say to publish — full version history is in the CMS admin: https://cms.thebradburygroup.net/admin/collections/${kind}/${id}.`
       : kind === 'faqs' || kind === 'testimonials'
         ? ` This saves live as soon as you approve it — there's no draft state for ${contentKind}s.`
         : '';
@@ -190,12 +190,12 @@ async function init() {
   const subtitleEl = document.querySelector('#page-content header p');
   if (subtitleEl) subtitleEl.textContent = HEADER_SUBTITLE_BY_ROLE[me.role] || HEADER_SUBTITLE_BY_ROLE.ui_editor;
 
-  // Public deployment: aiwebmaster is reached via webmaster.thebradburygroup.com
+  // Public deployment: aiwebmaster is reached via webmaster.thebradburygroup.net
   // (behind Caddy, no port), so `${hostname}:3002`-style LAN links no longer
   // resolve to anything — link straight to the public dev domain instead.
   // Staging isn't stood up as a public site yet, so its link stays hidden
   // rather than pointing somewhere that 404s.
-  document.getElementById('preview-link').href = 'https://app.thebradburygroup.com';
+  document.getElementById('preview-link').href = 'https://dev.thebradburygroup.net';
   document.getElementById('preview-link').classList.remove('hidden'); document.getElementById('preview-link').classList.add('flex');
 
   if (canRun(me, 'publish')) {
@@ -342,7 +342,7 @@ const FILE_PREFIX_TO_SERVICE = { 'apps/web/': 'web', 'apps/cms/': 'cms', 'apps/a
 
 function previewLink(label) {
   const a = document.createElement('a');
-  a.href = 'https://app.thebradburygroup.com';
+  a.href = 'https://dev.thebradburygroup.net';
   a.target = '_blank';
   a.textContent = label || '↗ Preview (dev)';
   a.className = 'inline-flex items-center gap-1 text-xs font-medium text-brand-teal hover:text-brand-gold transition-colors mt-1';

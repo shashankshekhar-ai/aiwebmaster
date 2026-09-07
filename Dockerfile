@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # approve/RBAC/audit pipeline — this identity is just the git-level
     # committer field, not a substitute for that audit trail.
     && git config --system user.name "AIwebmaster" \
-    && git config --system user.email "aiwebmaster@thebradburygroup.com"
+    && git config --system user.email "aiwebmaster@thebradburygroup.net"
 
 WORKDIR /app
 
@@ -34,7 +34,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN chmod +x entrypoint.sh
 
 EXPOSE 8010
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8010"]
