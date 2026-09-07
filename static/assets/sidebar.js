@@ -70,7 +70,7 @@ function renderShell(activePath) {
   }).join('');
 
   return `
-  <aside class="relative z-10 w-64 shrink-0 bg-black/95 backdrop-blur border-r border-white/10 shadow-lift flex flex-col p-4 animate-fade-in-left">
+  <aside class="relative z-10 w-64 shrink-0 bg-black/95 backdrop-blur border-r border-white/10 shadow-lift flex flex-col p-4 overflow-y-auto animate-fade-in-left">
     <div class="flex items-center gap-2.5 px-2 mb-1">
       <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-gold to-amber-600 flex items-center justify-center text-brand-navy font-black text-sm shadow-glow">A</div>
       <div>
@@ -338,11 +338,11 @@ async function mountChatMenu(activePath) {
           ${svgIcon('M9 5l7 7-7 7').replace('w-[18px] h-[18px]','w-3.5 h-3.5')}
         </button>
       </div>
-      <div id="chat-submenu" class="${expanded ? '' : 'hidden'} flex flex-col gap-0.5 mt-0.5 mb-1">
-        <a href="/" class="flex items-center gap-2 rounded-lg pl-8 pr-2 py-1.5 text-xs font-medium text-brand-gold hover:bg-brand-panel/70 transition-all">
+      <div id="chat-submenu" class="${expanded ? '' : 'hidden'} flex flex-col mt-0.5 mb-1">
+        <a href="/" class="shrink-0 flex items-center gap-2 rounded-lg pl-8 pr-2 py-1.5 text-xs font-medium text-brand-gold hover:bg-brand-panel/70 transition-all">
           + New chat
         </a>
-        ${sessionsHtml}
+        <div class="flex flex-col gap-0.5 overflow-y-auto max-h-[35vh]">${sessionsHtml}</div>
       </div>`;
 
     document.getElementById('chat-menu-toggle').onclick = (e) => {
@@ -411,11 +411,11 @@ async function mountAgentMenu(activePath) {
       : `<div class="text-[11px] text-brand-muted pl-8 py-1.5">No sessions yet</div>`;
 
     wrap.innerHTML = `
-      <div id="agent-submenu" class="${expanded ? '' : 'hidden'} flex flex-col gap-0.5 mt-0.5 mb-1">
-        <a href="/agent" class="flex items-center gap-2 rounded-lg pl-8 pr-2 py-1.5 text-xs font-medium text-brand-gold hover:bg-brand-panel/70 transition-all">
+      <div id="agent-submenu" class="${expanded ? '' : 'hidden'} flex flex-col mt-0.5 mb-1">
+        <a href="/agent" class="shrink-0 flex items-center gap-2 rounded-lg pl-8 pr-2 py-1.5 text-xs font-medium text-brand-gold hover:bg-brand-panel/70 transition-all">
           + New session
         </a>
-        ${sessionsHtml}
+        <div class="flex flex-col gap-0.5 overflow-y-auto max-h-[35vh]">${sessionsHtml}</div>
       </div>`;
 
     document.getElementById('agent-menu-toggle').onclick = (e) => {
