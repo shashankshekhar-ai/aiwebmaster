@@ -100,6 +100,18 @@ proposed copy — this firm's tone is confident and concrete, not salesy.
   files, fails to create something new" error shows up in `web` or `api`
   containers, check the same class of bug there first.
 
+- `content` action now supports `delete: true` (payload {kind, docId, delete: true}) for page/post/resource/case-study/faq/testimonial — was previously only removable via raw SQL. Permanent, no soft-delete.
+- Fixed: `publish:true` on a `content` action for post/resource/case-study
+  wasn't actually making it live — the collection's own `status` select
+  field (what apps/web's queries actually filter on) was disconnected
+  from the `publish` flag (which only touched Payload's own internal
+  draft/version state, never checked by the public site), and a second
+  bug in the create path unconditionally reset status back to "draft"
+  regardless. Both fixed in `apps/cms/src/endpoints/contentAgent.ts`.
+  If a future "I published it but it's not showing" report comes in for
+  ANY content kind, check this exact class of bug (status field vs.
+  Payload draft state) before assuming it's something else.
+
 ## Known unwired areas (as of this session)
 
 - The header logo (`apps/web/components/layout/HeaderNav.tsx`) is a hardcoded
