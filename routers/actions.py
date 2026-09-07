@@ -8,6 +8,7 @@ from auth.rate_limit import codegen_limiter
 from core.aiwebmaster_agent import EXECUTABLE_TYPES
 from core.executors import EXECUTORS, ExecutionError
 from db.audit import log_event
+from db.memory import add_memory
 
 router = APIRouter(dependencies=[Depends(require_session)])
 
@@ -92,6 +93,20 @@ def run_action(body: dict, request: Request) -> dict:
         result=result,
         ok=ok,
     )
+
+    # Auto-write to the chat model's own operational memory (db/memory.py,
+    # folded into every turn by core/context.py) on real failure only — a
+    # successful action needs no reminder, but a failure is exactly the
+    # kind of thing a human operator would remember without being told
+    # twice ("that failed last time because X"). Never touches password
+    # fields (same redacted copy used for the audit row above).
+    if not ok:
+        error_detail = str(result.get("error", "unknown error"))[:500]
+        add_memory(
+            action_type=action_type,
+            summary=f"A '{action_type}' action failed: {error_detail[:200]}",
+            detail=f"Full payload: {audit_payload}\nFull result: {result}"[:2000],
+        )
 
     if not ok:
         raise HTTPException(status_code=422, detail=result)

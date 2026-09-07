@@ -13,6 +13,7 @@ from db.audit import init_audit_table
 from db.chat_sessions import init_chat_tables
 from db.deploy_state import init_deploy_state_table
 from db.deployments import init_deployments_table
+from db.memory import init_memory_table
 from routers import actions, agent, backups, browse, chat, deploy, doctor, files, git, settings, system, users
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -27,6 +28,10 @@ def on_startup() -> None:
         init_audit_table()
     except Exception:
         logger.exception("failed to init aiwebmaster_audit table")
+    try:
+        init_memory_table()
+    except Exception:
+        logger.exception("failed to init aiwebmaster_memory table")
     try:
         bootstrap_admin()
     except Exception:

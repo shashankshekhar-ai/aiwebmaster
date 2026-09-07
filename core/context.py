@@ -14,6 +14,7 @@ from pathlib import Path
 import httpx
 
 from core.config import settings
+from db.memory import recent_memories
 
 logger = logging.getLogger(__name__)
 
@@ -91,4 +92,23 @@ def build_site_context() -> str:
         lines.append("Docker services:\n" + services)
 
     dynamic = "\n".join(lines) if len(lines) > 1 else ""
-    return "\n\n".join(part for part in (static, dynamic) if part)
+
+    # Auto-written operational memory (db/memory.py) — recent real action
+    # *failures* only, freshest first, never cached (unlike _static_context
+    # above) since this should reflect what just happened, not what was
+    # true at process start. Deliberately separate from the static/dynamic
+    # blocks above: this is "what went wrong recently and why", not "what
+    # the site currently looks like".
+    memories = recent_memories(limit=8)
+    memory_block = ""
+    if memories:
+        memory_lines = [
+            f"- [{m['created_at']}] {m['summary']}" for m in memories
+        ]
+        memory_block = (
+            "Recent real failures from actually running things (learn from these — "
+            "don't propose the same thing the same way again without addressing why "
+            "it failed):\n" + "\n".join(memory_lines)
+        )
+
+    return "\n\n".join(part for part in (static, dynamic, memory_block) if part)
