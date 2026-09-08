@@ -42,10 +42,13 @@ const ICON = {
 // use title/label, but faqs/testimonials don't have either.
 const TITLE_FIELD = { faqs: 'question', testimonials: 'name' };
 
-// Neither of these currently renders anywhere on the live site (FAQs: no
-// page at all; Testimonials: /about uses a hardcoded array, not the CMS) —
-// flagged so an editor doesn't spend time on content that goes nowhere yet.
-const NOT_LIVE_YET = new Set(['faqs', 'testimonials']);
+// FAQs still has no page anywhere on the live site — flagged so an editor
+// doesn't spend time on content that goes nowhere yet. Testimonials WAS in
+// this set too (/about used a hardcoded array, not the CMS) until the
+// design-parity pass wired /about to fetch this collection for real
+// (falls back to the hardcoded array only when the CMS has none yet, same
+// pattern as navigation).
+const NOT_LIVE_YET = new Set(['faqs']);
 
 // Pages are read straight from the repo (real routes) — the CMS `pages`
 // collection is unused, so there's nothing to "open in chat" here, only a
