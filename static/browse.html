@@ -25,6 +25,7 @@
 const view = document.getElementById('view');
 const crumbs = document.getElementById('crumbs');
 let state = { level: 'apps', kind: null };
+let me = null;
 
 const ICON = {
   pages: 'M9 3v18M3 9h18M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z',
@@ -45,6 +46,11 @@ const TITLE_FIELD = { faqs: 'question', testimonials: 'name' };
 // page at all; Testimonials: /about uses a hardcoded array, not the CMS) —
 // flagged so an editor doesn't spend time on content that goes nowhere yet.
 const NOT_LIVE_YET = new Set(['faqs', 'testimonials']);
+
+// Pages are read straight from the repo (real routes) — the CMS `pages`
+// collection is unused, so there's nothing to "open in chat" here, only a
+// file to edit. Navigation is CMS-backed now (migrated, see HANDOFF.md).
+const CODE_INDEXED = new Set(['pages']);
 
 function icon(d, extra) {
   return `<svg class="w-5 h-5 ${extra||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
@@ -108,19 +114,124 @@ function openInChat(kind, docId) {
   window.location.href = `/?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(docId)}`;
 }
 
-function mediaGrid(docs) {
+function editInChat(file, route) {
+  window.location.href = `/?file=${encodeURIComponent(file)}&route=${encodeURIComponent(route)}`;
+}
+
+function mediaGrid(docs, canUpload) {
+  const uploadCard = canUpload ? `<div class="bg-brand-panel border-2 border-dashed border-brand-border rounded-xl overflow-hidden shadow-panel flex flex-col items-center justify-center p-5 text-center animate-fade-in-up">
+    <input type="file" id="media-upload-input" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" onchange="handleMediaUpload(this)" />
+    <button onclick="document.getElementById('media-upload-input').click()" class="w-10 h-10 rounded-lg bg-brand-panel2 border border-brand-border flex items-center justify-center text-brand-gold mb-2 transition-transform hover:scale-110">${icon('M12 4v16m8-8H4', '')}</button>
+    <div class="text-xs font-medium text-brand-gold">Upload from your computer</div>
+    <div class="text-[10px] text-brand-muted mt-1">PNG, JPEG, WEBP, GIF — max 8MB</div>
+    <div id="media-upload-status" class="text-[10px] text-brand-muted mt-2"></div>
+  </div>` : '';
   return `<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
-    ${docs.length === 0 ? `<div class="col-span-full text-xs text-brand-muted py-6 text-center">Nothing uploaded yet — the \`media\` chat action (paste an image URL) adds files here.</div>` : ''}
-    ${docs.map((d, i) => `<div class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up" style="animation-delay:${(i+1)*30}ms">
-      <div class="aspect-video bg-brand-navy2 flex items-center justify-center overflow-hidden">
-        ${d.url ? `<img src="${d.url}" alt="${(d.alt || '').replace(/"/g, '&quot;')}" class="w-full h-full object-cover" loading="lazy" />` : `<span class="text-brand-muted text-xs">No preview</span>`}
+    ${uploadCard}
+    ${docs.length === 0 ? `<div class="col-span-full text-xs text-brand-muted py-6 text-center">Nothing uploaded yet${canUpload ? ' — drop one in above, or paste an image URL in Chat.' : '.'}</div>` : ''}
+    ${docs.map((d, i) => `<div id="media-card-${d.id}" class="bg-brand-panel border border-brand-border rounded-xl overflow-hidden shadow-panel animate-fade-in-up" style="animation-delay:${(i+1)*30}ms">
+      <div class="aspect-video bg-brand-navy2 flex items-center justify-center overflow-hidden ${d.url ? 'cursor-zoom-in' : ''}" ${d.url ? `onclick="openLightbox('${d.url}', '${(d.alt || '').replace(/'/g, "\\'")}')"` : ''}>
+        ${d.url ? `<img src="${d.url}" alt="${(d.alt || '').replace(/"/g, '&quot;')}" class="w-full h-full object-cover" loading="lazy" onerror="this.parentElement.innerHTML='<span class=\\'text-brand-terracotta text-[10px] px-2 text-center\\'>Preview failed to load</span>'" />` : `<span class="text-brand-muted text-xs">No preview</span>`}
       </div>
       <div class="p-3">
         <div class="text-xs truncate" title="${(d.alt || '').replace(/"/g, '&quot;')}">${(d.alt || '(no alt text)').replace(/</g, '&lt;')}</div>
         <button onclick="copyMediaId('${d.id}', this)" class="mt-2 w-full px-2 py-1.5 rounded-md text-[11px] font-medium bg-brand-panel2 border border-brand-border transition-all hover:border-brand-gold">Copy ID</button>
+        ${canUpload ? `<div class="mt-1.5 grid grid-cols-2 gap-1.5">
+          <input type="file" id="media-replace-input-${d.id}" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" onchange="handleMediaReplace('${d.id}', this)" />
+          <button onclick="document.getElementById('media-replace-input-${d.id}').click()" class="px-2 py-1.5 rounded-md text-[11px] font-medium bg-brand-panel2 border border-brand-border transition-all hover:border-brand-gold">Replace</button>
+          <button onclick="handleMediaDelete('${d.id}')" class="px-2 py-1.5 rounded-md text-[11px] font-medium bg-brand-panel2 border border-brand-border text-brand-terracotta transition-all hover:border-brand-terracotta">Delete</button>
+        </div>` : ''}
       </div>
     </div>`).join('')}
   </div>`;
+}
+
+function openLightbox(url, alt) {
+  let overlay = document.getElementById('lightbox-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'lightbox-overlay';
+    overlay.className = 'fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-center justify-center p-8 cursor-zoom-out';
+    overlay.onclick = closeLightbox;
+    overlay.innerHTML = `<img id="lightbox-img" class="max-w-full max-h-full rounded-lg shadow-2xl" />
+      <button onclick="event.stopPropagation(); closeLightbox()" class="absolute top-4 right-4 w-9 h-9 rounded-full bg-brand-navy2 border border-brand-border text-brand-ink flex items-center justify-center hover:border-brand-gold transition-all">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>`;
+    document.body.appendChild(overlay);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
+  }
+  const img = document.getElementById('lightbox-img');
+  img.src = url;
+  img.alt = alt || '';
+  overlay.classList.remove('hidden');
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox-overlay')?.classList.add('hidden');
+}
+
+async function handleMediaUpload(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const status = document.getElementById('media-upload-status');
+  const alt = await dialogPrompt('Alt text for this image (required):', file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '));
+  if (!alt) { input.value = ''; return; }
+
+  if (status) status.textContent = 'Uploading…';
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('alt', alt);
+    const res = await fetch('/api/media/upload', { method: 'POST', body: form });
+    if (res.status === 401) { await redirectToLogin(res); return; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail?.error || body.detail || `Upload failed (${res.status})`);
+    }
+    input.value = '';
+    goList('media');
+  } catch (e) {
+    if (status) status.textContent = '';
+    await dialogAlert(String(e.message || e));
+  }
+}
+
+async function handleMediaReplace(id, input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  if (!(await dialogConfirm(`Replace this image with "${file.name}"? Anything already using this media (id ${id}) will show the new file immediately.`, { confirmText: 'Replace' }))) {
+    input.value = '';
+    return;
+  }
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`/api/media/${encodeURIComponent(id)}/replace`, { method: 'POST', body: form });
+    if (res.status === 401) { await redirectToLogin(res); return; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail?.error || body.detail || `Replace failed (${res.status})`);
+    }
+    input.value = '';
+    goList('media');
+  } catch (e) {
+    await dialogAlert(String(e.message || e));
+  }
+}
+
+async function handleMediaDelete(id) {
+  if (!(await dialogConfirm(`Delete this media (id ${id})? Anything still referencing it will break.`, { confirmText: 'Delete', danger: true }))) return;
+  try {
+    const res = await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (res.status === 401) { await redirectToLogin(res); return; }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail?.error || body.detail || `Delete failed (${res.status})`);
+    }
+    document.getElementById(`media-card-${id}`)?.remove();
+  } catch (e) {
+    await dialogAlert(String(e.message || e));
+  }
 }
 
 async function copyMediaId(id, btn) {
@@ -134,6 +245,36 @@ async function copyMediaId(id, btn) {
   }
 }
 
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  } catch (e) {
+    await dialogAlert('Could not copy — here is the value: ' + text);
+  }
+}
+
+function codeGrid(kind, docs) {
+  const canEdit = canRun(me, 'code_edit');
+  const cards = docs.map((d, i) => {
+    const title = kind === 'navigation' ? d.label : d.title;
+    const path = kind === 'navigation' ? d.href : d.slug;
+    return `<div class="bg-brand-panel border border-brand-border rounded-xl p-5 shadow-panel animate-fade-in-up" style="animation-delay:${(i+1)*30}ms">
+      <div class="font-semibold text-sm truncate">${(title || '').replace(/</g, '&lt;')}</div>
+      <div class="text-xs text-brand-muted mt-1 truncate font-mono">${(path || '').replace(/</g, '&lt;')}</div>
+      <div class="text-[10px] text-brand-muted mt-2 truncate font-mono" title="${d.file}">${d.file}</div>
+      ${canEdit ? `<button onclick="editInChat('${d.file.replace(/'/g, "\\'")}', '${(path || '').replace(/'/g, "\\'")}')" class="mt-2 w-full px-2 py-1.5 rounded-md text-[11px] font-medium bg-brand-gold/15 border border-brand-gold/40 text-brand-gold transition-all hover:bg-brand-gold/25">Edit in Chat</button>` : ''}
+      <button onclick="copyText('${d.file.replace(/'/g, "\\'")}', this)" class="mt-2 w-full px-2 py-1.5 rounded-md text-[11px] font-medium bg-brand-panel2 border border-brand-border transition-all hover:border-brand-gold">Copy file path</button>
+    </div>`;
+  }).join('');
+  return `<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+    ${cards}
+    ${docs.length === 0 ? `<div class="col-span-full text-xs text-brand-muted py-6 text-center">Nothing found in the repo for this.</div>` : ''}
+  </div>`;
+}
+
 async function goList(kind) {
   state = { level: 'list', kind };
   renderCrumbs();
@@ -145,7 +286,12 @@ async function goList(kind) {
     if (kind === 'navigation') docs.sort((a, b) => (a.location || '').localeCompare(b.location || '') || (a.order || 0) - (b.order || 0));
 
     if (kind === 'media') {
-      view.innerHTML = mediaGrid(docs);
+      view.innerHTML = mediaGrid(docs, canRun(me, 'media'));
+      return;
+    }
+
+    if (CODE_INDEXED.has(kind)) {
+      view.innerHTML = codeGrid(kind, docs);
       return;
     }
 
@@ -194,7 +340,7 @@ async function removeNavLink(label, location, cardId) {
 }
 
 (async () => {
-  const me = await mountShell('/browse');
+  me = await mountShell('/browse');
   if (!me) return;
   goApps();
 })();

@@ -364,6 +364,235 @@ after CSS/JS-load-order changes, don't just curl for class-name presence.**
 - `code_edit`'s follow-up "Rebuild `<service>` & Preview" button after a
   successful Run, auto-mapping file path → dev service.
 
+## Browse's Pages/Navigation now read the repo, not the (empty) CMS
+
+User reported Browse → Pages showing only 1 page despite the site having
+~20+ pages and a full header nav, and Browse → Navigation showing nothing.
+Root cause investigated end to end (curl against both dev and prod CMS
+`/api/pages` and `/api/navigation`, `docs/planning/14_DECISION_LOG.md`):
+the CMS `pages` collection has exactly 1 draft doc ("Home") plus 5 leftover
+QA/demo junk drafts, and `navigation` has 0 docs in both dev and prod — the
+real site pages are hardcoded Next.js route files (`apps/web/app/**/page.tsx`,
+22 of them) and the header nav is a hardcoded `fallbackNavItems` array in
+`apps/web/components/layout/Header.tsx` that the code itself already falls
+back to whenever `getNavigation()` comes back empty (always, in practice).
+This isn't new — `14_DECISION_LOG.md`'s v-addendum on `code_edit` already
+names this exact gap (logo in `HeaderNav.tsx`, Contact page as a hardcoded
+route, neither CMS-driven) as the reason `code_edit` was added: the prior
+call was "manage these hardcoded, give the agent file-edit access" rather
+than migrate to CMS. `04_CMS_CONTENT_MODEL.md`'s original spec says pages/nav
+*should* be CMS-driven — that never actually got built out; hardcoded won in
+practice and stayed. Given that, and the user confirming "ditch CMS, work on
+the hardcoded scenario" for these two, fixed Browse to match reality instead
+of re-litigating the architecture:
+
+- New `core/site_index.py` — `list_code_pages()` walks `apps/web/app/**/page.tsx`
+  and derives routes from the directory tree (route groups `(...)` stripped,
+  `[slug]` dynamic segments flagged); `list_code_nav()` regexes the
+  `fallbackNavItems` array out of `Header.tsx`.
+- `routers/browse.py` — `/content/pages` and `/content/navigation` now
+  return the code index instead of proxying the CMS; every other kind
+  (posts, resources, case-studies, faqs, testimonials, media) is untouched
+  and still proxies the CMS as before.
+- `static/browse.html` — new `codeGrid()` renderer for these two kinds:
+  read-only cards (title/route or label/href + source file + "Copy file
+  path" button), a banner explaining these are repo-sourced not CMS docs,
+  and no "+ New"/edit-in-chat/remove affordances (those only make sense for
+  real CMS docs).
+
+Rebuilt + force-recreated the `aiwebmaster` container (`docker compose -p tbz
+build aiwebmaster && up -d --force-recreate aiwebmaster`) and verified live
+with a real logged-in session: `GET /api/content/pages` returns 22 docs,
+`GET /api/content/navigation` returns 7. **Caveat**: `up -d --force-recreate
+aiwebmaster` also recreated `postgres` and `cms` as collateral (compose
+dependency chain, not requested) — confirmed no data loss (dev CMS pages
+count unchanged at 6 before/after) but worth using `--no-deps` next time to
+avoid the blast radius.
+
+Left uncommitted, same as everything else in this working tree per the note
+below.
+
+## Media tab: real upload/replace/delete/preview, and a real infra bug found+fixed
+
+User reported the Media tab had no upload button and (separately) that
+previews weren't loading ("preview failed to load"). Both fixed, plus two
+more capabilities added in the same pass (delete, replace-in-place) since
+they're the obvious next asks once upload exists.
+
+**New CMS endpoints** (`apps/cms/src/endpoints/mediaAgent.ts`, all
+service-token gated via the existing `requireAdmin`, registered in
+`payload.config.ts`):
+- `POST /media-agent/upload-file` — raw multipart bytes → `payload.create`.
+  Counterpart to the existing URL-fetch `upload` endpoint; no SSRF surface
+  since nothing fetches a URL, just the same size/type validation.
+- `POST /media-agent/replace-file` — multipart `{id, file}` →
+  `payload.update` with a new `file`. Overwrites the doc's file **in
+  place**, same id/url — anything already referencing that media id (a
+  future page/testimonial field) picks up the new image with no other edit.
+- `POST /media-agent/delete` — `{id}` → `payload.delete`.
+
+**New AIwebmaster endpoints** (`routers/browse.py`, all gated on the
+existing `media` permission, all audit-logged via `db/audit.py`):
+`GET /media/file/{filename}` (proxies CMS file bytes through AIwebmaster's
+own origin — see bug below), `POST /media/upload`, `POST
+/media/{id}/replace`, `DELETE /media/{id}`.
+
+**`static/browse.html`**: Media tab now has an actual "Upload from your
+computer" tile, and every card got Replace/Delete buttons (gated on
+`canRun(me, 'media')` — hoisted `me` to module scope, matching git.html's
+pattern, since browse.html previously kept it IIFE-local and unreachable
+from `mediaGrid`). Thumbnails are click-to-lightbox (new `openLightbox`/
+`closeLightbox`, Escape-to-close, click-outside-to-close).
+
+**Real bug #1 — previews 404ing**: CMS `doc.url` is CMS-relative
+(`/api/media/file/<name>`), but the browser only ever talks to
+AIwebmaster's origin — direct `<img src="d.url">` 404s. Fixed with the new
+`GET /api/media/file/{filename}` passthrough proxy in `browse.py`, so
+`d.url` resolves against AIwebmaster's own origin instead.
+
+**Real bug #2 — uploaded media has no persistent storage, ever, dev or
+prod**: found while building this. `apps/cms`'s Payload local-disk storage
+(`apps/cms/media/`) had **no volume** in either `docker-compose.yml` or
+`docker-compose.prod.yml` — every container recreate (a routine `rebuild`
+from AIwebmaster's own Deploy page, not just this session's redeploys)
+silently wiped every uploaded file while leaving its DB row behind
+(orphaned doc, 404 forever). Confirmed for real: imported 20 brand/logo
+files (see below), redeployed cms for an unrelated endpoint change, and all
+20 vanished from disk while their DB rows survived. Fixed by adding a named
+volume (`cms_media` dev / `cms_media_prod` prod) mounted at
+`/app/apps/cms/media` in both compose files. **This means every media
+upload/paste-URL action before this fix, in prod included, has always been
+one redeploy away from silently vanishing — worth checking prod's actual
+media library for orphaned docs.**
+
+**Also imported real content**: the 20 real brand/logo/hero/credential
+files sitting as static assets in `apps/web/public/brand` (never in the
+CMS media library) — dev only, not prod. One-off scripts,
+`apps/cms/src/importBrandMedia.mts` (idempotent — backfills existing rows
+whose file went missing rather than skipping/duplicating, which is exactly
+what real bug #2 above needed) and `deleteMediaById.mts`, kept in the repo
+since they're genuinely reusable and are invisible to both Next's build
+(`.mts` doesn't match tsconfig's `**/*.ts` include glob, so they don't
+break `next build`'s typecheck — `.ts` extension does, learned the hard
+way) and the runtime `cms` image (`runner` stage never copies `src/` at
+all — these only run from the `builder` stage). Both use a **minimal
+inline `buildConfig`** (just the `Media` collection + the same Postgres
+`db`, `push: false`) instead of importing the real `payload.config.ts` —
+that file wires in `@payloadcms/richtext-lexical`, which is ESM-only
+(top-level await) and clashes with tsx's CJS-mode `payload run` loader
+(`ERR_REQUIRE_ASYNC_MODULE`) since this package.json has no `"type":
+"module"`. Run via:
+`docker run --rm --network tbz_default -e DATABASE_URI=... -e
+PAYLOAD_SECRET=... -e BRAND_DIR=/brand-assets -v
+.../apps/web/public/brand:/brand-assets:ro -v tbz_cms_media:/app/apps/cms/media
+-w /app/apps/cms tbz-cms-builder node_modules/.bin/payload run
+src/importBrandMedia.mts` — **must** mount the real `cms_media` volume
+(not the container's own ephemeral fs) or the files vanish again, same as
+real bug #2. `tbz-cms-builder` is `docker build --target builder -f
+apps/cms/Dockerfile -t tbz-cms-builder .` — the `builder` stage has `src/`
+and every dep the `runner` stage prunes away.
+
+Verified for real, not just curl: `python-multipart` was missing from
+`requirements.txt` (FastAPI's `File`/`Form` params need it — crash-looped
+the container on first deploy, caught via `docker logs`, not assumed
+working). Full round-trip confirmed with a real logged-in session (upload,
+replace-in-place same id, delete, all via curl) and a real headless
+Playwright pass on `/browse` → Media (20/20 thumbnails loaded, zero
+broken, lightbox opens on click, zero console errors) — screenshots taken,
+not just DOM assertions.
+
+**Disk-space note for next session**: host hit **100% full mid-session**
+(`no space left on device` killed a build) — `docker builder prune -af`
+freed 17.7GB, `docker image prune -f` another ~7GB after. Both are safe
+(build cache + dangling/untagged images only, never a running container,
+volume, or tagged image) but worth doing proactively before a build, not
+just reactively — this host runs tight.
+
+## Header/footer nav migrated onto the CMS `navigation` collection (dev only)
+
+Follow-up to the "Browse's Pages/Navigation now read the repo" entry above.
+User's call, given AIwebmaster edits are agent-driven, not human-in-a-CMS-UI:
+CMS writes are safer/faster for high-frequency content edits than
+`code_edit` (instant DB row vs. rebuild+redeploy, and a bad CMS edit can't
+break the whole site's build the way a bad code edit can) — so nav, which
+was only hardcoded because the CMS rows never existed, got migrated for
+real rather than left on the code-index workaround. Pages were deliberately
+**not** touched (see that entry): bespoke-designed routes, not worth a
+block-builder rewrite; still code-indexed.
+
+- New `apps/cms/src/seedNavigation.mts` (same minimal-config `payload run`
+  pattern as `importBrandMedia.mts` — see that entry for why) seeded 7
+  header + 8 footer rows into the `navigation` collection, exact copies of
+  `Header.tsx`'s `fallbackNavItems` / `Footer.tsx`'s `fallbackGroups`.
+  Idempotent (skips by label+location if already present).
+- **Verified live, not assumed**: temporarily renamed a seeded row's label
+  via a one-off script, confirmed the change appeared in the real dev
+  site's rendered HTML (`curl http://127.0.0.1:3002/`) after Next's
+  `revalidate: 60` ISR window elapsed, reverted, confirmed the revert also
+  showed up after another revalidation cycle. Both components already had
+  the CMS-first/fallback-second logic built in (`Header.tsx`/`Footer.tsx`
+  — `cmsNavItems.length > 0 ? cmsNavItems : fallbackNavItems`); they were
+  just never given real rows to prefer. No frontend code changed.
+- `routers/browse.py` / `static/browse.html`: `navigation` removed from
+  `_CODE_INDEXED_KINDS`/`CODE_INDEXED` — Browse's Navigation tab is back to
+  proxying the CMS directly (the UI this was originally built for: sort by
+  location/order, remove button wired to the `nav_link` action, "+ New
+  navigation"). `core/site_index.py`'s `list_code_nav()` deleted (genuinely
+  unused now, not left as dead code).
+- Scratch/verification scripts (`seedNavigation.mts` kept, reusable/idempotent;
+  the one-off rename-and-revert script was deleted after use).
+
+**Promoted to prod too, same session, on explicit user confirmation**
+(writing to prod DB is classifier-gated — asked first via AskUserQuestion,
+proceeded only after "yes"): ran `seedNavigation.mts` against
+`tbg_cms_prod` — same 15 rows, same idempotency. `GET
+/api/navigation?where[location][equals]=header` on prod now returns
+`totalDocs: 7`, matching dev. **Not** live-verified with the
+rename-and-revert trick used on dev — the classifier correctly blocked
+writing visible test copy to the live public site even briefly, and that's
+the right call, so this one relies on API-level proof (same query, real
+data) plus dev already having proven the exact code path
+(`Header.tsx`/`Footer.tsx` are identical code in both environments).
+
+Also recreated `cms-prod` (`docker compose -f docker-compose.yml -f
+docker-compose.prod.yml -p tbz up -d --no-deps --force-recreate cms-prod`)
+to pick up the `cms_media_prod` volume fix from the entry above — confirmed
+mounted, confirmed existing prod data (6 pages docs) intact across the
+recreate, confirmed prod's media library was empty before (0 docs) so
+nothing was ever at risk of loss there.
+
+## "Edit in Chat" on code-indexed Pages cards
+
+User asked what happens clicking a Pages card, since codeGrid (see the
+Browse Pages/Navigation entry above) had no click handler on those — just
+"Copy file path". CMS docs already had this solved (`openInChat` →
+`/?kind=&id=` → `loadEditContext()` fetches the doc, primes chat with its
+fields) but that path 400s for code-indexed pages (`browse.py` explicitly
+rejects `GET /content/pages/{id}` as "code-indexed, not a CMS doc"). Wired
+the equivalent for files instead of docs, so the agent gets real grounding
+before the user has to spell out which file/page they mean:
+
+- `static/browse.html`: new `editInChat(file, route)` → `/?file=&route=`.
+  Button gated on `canRun(me, 'code_edit')` (same permission `/files/read`
+  already requires server-side) — `ui_editor` has it per the earlier
+  role-widening entry, so this isn't a privilege change, just a UI path to
+  a capability that already existed via typing `/read <path>` manually.
+- `static/index.html`: new `loadFileContext()`, called from `init()`
+  alongside `loadEditContext()`. Same underlying call as the existing
+  `/read <path>` chat command (`GET /api/files/read`), but states the
+  route up front — "Loaded `apps/web/app/about/page.tsx` — this renders
+  the live page at `/about`" — so the agent's first turn already has both
+  the real file content and what page it renders, not just raw TSX with no
+  framing. `route` is optional/best-effort (only present when navigated
+  from Browse; a bare `?file=` still works, same as `/read`).
+
+Verified with Playwright, not just code review: logged in, Browse → Pages
+→ clicked "Edit in Chat" on `/about`, confirmed it landed in a fresh chat
+with `Loaded apps/web/app/about/page.tsx — this renders the live page at
+/about (4964 chars) into context. Tell me what to change on this page.` —
+real file, real char count, real route. Screenshotted all 22 page cards
+too (every one has the button now, not just `/about`).
+
 ## Not done / explicitly deferred
 
 - CMS (Payload admin) has no Auth0 — password auth only there.

@@ -78,6 +78,33 @@ async function loadSessionFromUrl() {
   messages.forEach(m => addMsg(m.role, m.content));
 }
 
+// Code-indexed pages (Browse → Pages, see core/site_index.py) aren't CMS
+// docs — there's no doc to fetch, just a file. `?file=&route=` (from
+// browse.html's "Edit in Chat" button) skips the CMS editContext flow
+// entirely and goes straight to the same /read path load the /read chat
+// command uses, but with the route framed up front so the agent's first
+// message already states the file AND which live page it renders —
+// otherwise the agent only learns "here's some TSX", not what page it's
+// looking at or why, and the user has to spell that out themselves.
+async function loadFileContext() {
+  const params = new URLSearchParams(window.location.search);
+  const path = params.get('file');
+  if (!path) return;
+  const route = params.get('route') || '';
+  try {
+    const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
+    const data = await res.json();
+    if (!res.ok) { addMsg('assistant', `Couldn't load ${path}: ${data.detail || res.status}`); return; }
+    const routeNote = route ? ` — this renders the live page at ${route}` : '';
+    const fileMsg = `File ${data.path}${routeNote}:\n\n${data.content}`;
+    history.push({ role: 'user', content: fileMsg });
+    addMsg('assistant', `Loaded ${data.path}${routeNote} (${data.content.length} chars) into context. Tell me what to change on this page.`);
+    history.push({ role: 'assistant', content: `Loaded ${data.path}${routeNote} into context.` });
+  } catch (e) {
+    addMsg('assistant', `Couldn't load ${path}: ${e}`);
+  }
+}
+
 const KIND_TO_CONTENT_KIND = { pages: 'page', posts: 'post', resources: 'resource', 'case-studies': 'case-study', navigation: 'nav_link', faqs: 'faq', testimonials: 'testimonial' };
 const KIND_TITLE_FIELD = { pages: 'title', posts: 'title', resources: 'title', 'case-studies': 'title', faqs: 'question', testimonials: 'name' };
 let editContext = null;
@@ -257,6 +284,7 @@ async function init() {
   send.disabled = false;
   await loadSessionFromUrl();
   await loadEditContext();
+  await loadFileContext();
   if (!currentSessionId && history.length === 0) showEmptyState();
   input.focus();
 }
