@@ -22,11 +22,8 @@
       <p class="text-xs text-brand-muted mt-0.5">Ask me to edit content, redeploy services, run SQL, or manage the site — every action is shown before it runs.</p>
     </div>
     <div class="flex items-center gap-2 shrink-0">
-      <a id="preview-link" href="#" target="_blank" class="hidden sm:flex items-center gap-1.5 text-xs text-brand-muted hover:text-brand-ink transition-colors px-2.5 py-1.5 rounded-lg border border-brand-border hover:border-emerald-400/40">
-        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot"></span>Preview (dev)
-      </a>
-      <a id="live-link" href="#" target="_blank" class="hidden sm:flex items-center gap-1.5 text-xs text-brand-muted hover:text-brand-ink transition-colors px-2.5 py-1.5 rounded-lg border border-brand-border hover:border-brand-gold/40">
-        <span class="w-1.5 h-1.5 rounded-full bg-brand-gold animate-pulse-dot"></span>Live (preview)
+      <a id="dev-link" href="#" target="_blank" class="hidden sm:flex items-center gap-1.5 text-xs text-brand-muted hover:text-brand-ink transition-colors px-2.5 py-1.5 rounded-lg border border-brand-border hover:border-emerald-400/40">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-dot"></span>Dev
       </a>
       <button id="rollback-btn" style="display:none;"
         class="items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-panel2 text-brand-ink border border-brand-border transition-all hover:brightness-110 active:scale-[.97] disabled:opacity-40 disabled:cursor-default">
@@ -220,10 +217,11 @@ async function init() {
   // Public deployment: aiwebmaster is reached via webmaster.thebradburygroup.net
   // (behind Caddy, no port), so `${hostname}:3002`-style LAN links no longer
   // resolve to anything — link straight to the public dev domain instead.
-  // Staging isn't stood up as a public site yet, so its link stays hidden
-  // rather than pointing somewhere that 404s.
-  document.getElementById('preview-link').href = 'https://dev.thebradburygroup.net';
-  document.getElementById('preview-link').classList.remove('hidden'); document.getElementById('preview-link').classList.add('flex');
+  // The preview/staging tier isn't stood up as a public site yet, so its
+  // link was removed entirely rather than left hidden/dead — add it back
+  // once that tier actually has a public URL.
+  document.getElementById('dev-link').href = 'https://dev.thebradburygroup.net';
+  document.getElementById('dev-link').classList.remove('hidden'); document.getElementById('dev-link').classList.add('flex');
 
   if (canRun(me, 'publish')) {
     const btn = document.getElementById('publish-btn');
